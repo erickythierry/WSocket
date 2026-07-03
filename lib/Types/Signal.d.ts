@@ -12,6 +12,8 @@ type DecryptSignalProtoOpts = {
     jid: string;
     type: 'pkmsg' | 'msg';
     ciphertext: Uint8Array;
+    /** JID do número (PN) equivalente, quando `jid` é um @lid — usado pra migrar sessão PN -> LID */
+    pnJid?: string;
 };
 type EncryptMessageOpts = {
     jid: string;

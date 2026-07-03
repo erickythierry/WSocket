@@ -2,7 +2,7 @@ import * as libsignal from 'libsignal'
 import { SignalAuthState } from '../Types'
 import { SignalRepository } from '../Types/Signal'
 import { generateSignalPubKey } from '../Utils'
-import { jidDecode } from '../WABinary'
+import { isLidUser, jidDecode } from '../WABinary'
 import type { SenderKeyStore } from './Group/group_cipher'
 import { SenderKeyName } from './Group/sender-key-name'
 import { SenderKeyRecord } from './Group/sender-key-record'
@@ -10,6 +10,32 @@ import { GroupCipher, GroupSessionBuilder, SenderKeyDistributionMessage } from '
 
 export function makeLibSignalRepository(auth: SignalAuthState): SignalRepository {
 	const storage: SenderKeyStore = signalStorage(auth)
+
+	// Sessões antigas ficam salvas sob o endereço do número (PN), mas o WhatsApp
+	// passou a endereçar mensagens por LID. Sem migrar, o decrypt procura a sessão
+	// no endereço LID, não acha nada e estoura "No matching sessions found".
+	// Copia o record serializado PN -> LID na primeira mensagem LID daquele device.
+	const migrateSessionIfNeeded = async (lidJid: string, pnJid: string) => {
+		const pnUser = jidDecode(pnJid)?.user
+		if (!pnUser) {
+			return
+		}
+
+		const lidAddr = jidToSignalProtocolAddress(lidJid).toString()
+		const { [lidAddr]: lidSess } = await auth.keys.get('session', [lidAddr])
+		if (lidSess) {
+			return
+		}
+
+		// mesmo device id nos dois endereçamentos
+		const device = jidDecode(lidJid)?.device || 0
+		const pnAddr = new libsignal.ProtocolAddress(pnUser, device).toString()
+		const { [pnAddr]: pnSess } = await auth.keys.get('session', [pnAddr])
+		if (pnSess) {
+			await auth.keys.set({ session: { [lidAddr]: pnSess } })
+		}
+	}
+
 	return {
 		decryptGroupMessage({ group, authorJid, msg }) {
 			const senderName = jidToSignalSenderKeyName(group, authorJid)
@@ -40,7 +66,11 @@ export function makeLibSignalRepository(auth: SignalAuthState): SignalRepository
 
 			await builder.process(senderName, senderMsg)
 		},
-		async decryptMessage({ jid, type, ciphertext }) {
+		async decryptMessage({ jid, type, ciphertext, pnJid }) {
+			if (pnJid && isLidUser(jid)) {
+				await migrateSessionIfNeeded(jid, pnJid)
+			}
+
 			const addr = jidToSignalProtocolAddress(jid)
 			const session = new libsignal.SessionCipher(storage as any, addr)
 			let result: Buffer

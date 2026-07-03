@@ -1,5 +1,5 @@
 import NodeCache from '@cacheable/node-cache';
 declare const caches: {
-    lidCache: NodeCache;
+    lidCache: NodeCache<unknown>;
 };
 export default caches;

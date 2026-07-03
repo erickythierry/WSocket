@@ -237,7 +237,8 @@ export const decryptMessageNode = (
 								msgBuffer = await repository.decryptMessage({
 									jid: user,
 									type: e2eType,
-									ciphertext: content
+									ciphertext: content,
+									pnJid: stanza.attrs.sender_pn || stanza.attrs.participant_pn
 								})
 								break
 							case 'plaintext':
