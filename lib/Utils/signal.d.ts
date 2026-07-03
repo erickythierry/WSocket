@@ -15,6 +15,25 @@ export declare const generateOrGetPreKeys: (creds: AuthenticationCreds, range: n
 };
 export declare const xmppSignedPreKey: (key: SignedKeyPair) => BinaryNode;
 export declare const xmppPreKey: (pair: KeyPair, id: number) => BinaryNode;
+/**
+ * Extrai o bundle de chaves (registration/identity/skey/key) que o receptor
+ * inclui no retry receipt quando não consegue decriptar. Portado do upstream
+ * WhiskeySockets/Baileys v7 — permite reestabelecer a sessão direto do receipt,
+ * sem depender de usync/assertSessions.
+ */
+export declare const extractE2ESessionFromRetryReceipt: (receipt: BinaryNode) => {
+    registrationId: number;
+    identityKey: Buffer<ArrayBufferLike>;
+    signedPreKey: {
+        keyId: number;
+        publicKey: Buffer<ArrayBufferLike>;
+        signature: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>;
+    };
+    preKey: {
+        keyId: number;
+        publicKey: Uint8Array;
+    } | undefined;
+} | null;
 export declare const parseAndInjectE2ESessions: (node: BinaryNode, repository: SignalRepository, lid?: string | null | undefined, meid?: string, melid?: string) => Promise<void>;
 export declare const extractDeviceJids: (result: USyncQueryResultList[], myJid: string, excludeZeroDevices: boolean, mylid?: string) => JidWithDevice[];
 /**

@@ -79,6 +79,67 @@ export const xmppPreKey = (pair: KeyPair, id: number): BinaryNode => ({
 	]
 })
 
+const isValidUInt = (n: number | undefined): n is number => typeof n === 'number' && Number.isInteger(n)
+
+/**
+ * Extrai o bundle de chaves (registration/identity/skey/key) que o receptor
+ * inclui no retry receipt quando não consegue decriptar. Portado do upstream
+ * WhiskeySockets/Baileys v7 — permite reestabelecer a sessão direto do receipt,
+ * sem depender de usync/assertSessions.
+ */
+export const extractE2ESessionFromRetryReceipt = (receipt: BinaryNode) => {
+	const keysNode = getBinaryNodeChild(receipt, 'keys')
+	if (!keysNode) {
+		return null
+	}
+
+	const typeBuf = getBinaryNodeChildBuffer(keysNode, 'type')
+	if (!typeBuf || typeBuf.length !== 1 || typeBuf[0] !== KEY_BUNDLE_TYPE[0]) {
+		return null
+	}
+
+	const identity = getBinaryNodeChildBuffer(keysNode, 'identity')
+	const skey = getBinaryNodeChild(keysNode, 'skey')
+	if (!identity || identity.length !== 32 || !skey) {
+		return null
+	}
+
+	const registrationId = getBinaryNodeChildUInt(receipt, 'registration', 4)
+	if (!isValidUInt(registrationId)) {
+		return null
+	}
+
+	const signedPubKey = getBinaryNodeChildBuffer(skey, 'value')
+	const signedSig = getBinaryNodeChildBuffer(skey, 'signature')
+	const signedKeyId = getBinaryNodeChildUInt(skey, 'id', 3)
+	if (!signedPubKey || signedPubKey.length !== 32 || !signedSig || !isValidUInt(signedKeyId)) {
+		return null
+	}
+
+	const preKeyNode = getBinaryNodeChild(keysNode, 'key')
+	let preKey: { keyId: number; publicKey: Uint8Array } | undefined
+	if (preKeyNode) {
+		const preKeyPub = getBinaryNodeChildBuffer(preKeyNode, 'value')
+		const preKeyId = getBinaryNodeChildUInt(preKeyNode, 'id', 3)
+		if (!preKeyPub || preKeyPub.length !== 32 || !isValidUInt(preKeyId)) {
+			return null
+		}
+
+		preKey = { keyId: preKeyId, publicKey: generateSignalPubKey(preKeyPub) }
+	}
+
+	return {
+		registrationId,
+		identityKey: generateSignalPubKey(identity),
+		signedPreKey: {
+			keyId: signedKeyId,
+			publicKey: generateSignalPubKey(signedPubKey),
+			signature: signedSig
+		},
+		preKey
+	}
+}
+
 export const parseAndInjectE2ESessions = async (node: BinaryNode, repository: SignalRepository, lid?: string | null | undefined, meid?: string, melid?:string) => {
 	const extractKey = (key: BinaryNode) =>
 		key

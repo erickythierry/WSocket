@@ -29,6 +29,7 @@ import {
 	derivePairingCodeKey,
 	encodeBigEndian,
 	encodeSignedDeviceIdentity,
+	extractE2ESessionFromRetryReceipt,
 	getCallStatusFromNode,
 	getHistoryMsg,
 	getNextPreKeys,
@@ -619,7 +620,12 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		msgRetryCache.set(key, newValue)
 	}
 
-	const sendMessagesAgain = async (key: proto.IMessageKey, ids: string[], retryNode: BinaryNode) => {
+	const sendMessagesAgain = async (
+		key: proto.IMessageKey,
+		ids: string[],
+		retryNode: BinaryNode,
+		receiptNode: BinaryNode
+	) => {
 		// todo: implement a cache to store the last 256 sent messages (copy whatsmeow)
 		const msgs = await Promise.all(ids.map(id => getMessage({ ...key, id })))
 		const remoteJid = key.remoteJid!
@@ -628,7 +634,30 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		// just re-send the message to everyone
 		// prevents the first message decryption failure
 		const sendToAll = !jidDecode(participant)?.device
-		//await assertSessions([participant], true)
+
+		// Reestabelece a sessão com quem pediu o retry, senão reenviamos com a MESMA
+		// sessão que o outro lado não conseguiu decriptar e o loop nunca fecha.
+		// Preferência: bundle de chaves que veio dentro do próprio retry receipt
+		// (portado do upstream v7); fallback: força fetch de prekey bundle via usync.
+		let injectedFromBundle = false
+		const bundle = extractE2ESessionFromRetryReceipt(receiptNode)
+		if (bundle) {
+			try {
+				await signalRepository.injectE2ESession({ jid: participant, session: bundle as any })
+				injectedFromBundle = true
+				logger.debug({ participant }, 'injected session from retry receipt key bundle')
+			} catch (error) {
+				logger.warn({ error, participant }, 'failed to inject session from retry receipt')
+			}
+		}
+
+		if (!injectedFromBundle) {
+			try {
+				await assertSessions([participant], true)
+			} catch (error) {
+				logger.warn({ error, participant }, 'failed to assert session for retry')
+			}
+		}
 
 		if (isJidGroup(remoteJid)) {
 			await authState.keys.set({ 'sender-key-memory': { [remoteJid]: null } })
@@ -735,7 +764,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 							if (key.fromMe) {
 								try {
 									logger.debug({ attrs, key }, 'recv retry request')
-									await sendMessagesAgain(key, ids, retryNode)
+									await sendMessagesAgain(key, ids, retryNode, node)
 								} catch (error) {
 									logger.error({ key, ids, trace: error.stack }, 'error in sending message again')
 								}
