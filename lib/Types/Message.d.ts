@@ -224,6 +224,19 @@ export type MessageRelayOptions = MinimalRelayOptions & {
     /** jid list of participants for status@broadcast */
     statusJidList?: string[];
     isretry?: boolean;
+    /**
+     * POC exclude-relay: usuários (phone ou lid) cujos devices NÃO devem entrar no <participants> de um envio de grupo.
+     * Todos os devices desses usuários são removidos antes de gerar a sender-key => eles não decifram o skmsg.
+     * Resolve phone<->lid via metadados do grupo. Usar apenas para estudo/deteccao.
+     */
+    excludeJids?: string[];
+    /**
+     * POC exclude-relay (inverso de excludeJids): whitelist. Somente os usuários (phone ou lid) nesta lista
+     * — mais o próprio remetente — mantêm seus devices no <participants>; todos os demais são removidos e
+     * veem o stub. Se `includeJids` estiver setado, tem precedência sobre `excludeJids`. Resolve phone<->lid
+     * via metadados do grupo. Usar apenas para estudo/deteccao.
+     */
+    includeJids?: string[];
 };
 export type MiscMessageGenerationOptions = MinimalRelayOptions & {
     /** optional, if you want to manually set the timestamp of the message */
@@ -242,6 +255,10 @@ export type MiscMessageGenerationOptions = MinimalRelayOptions & {
     font?: number;
     /** if it is broadcast */
     broadcast?: boolean;
+    /** POC exclude-relay: repassado ao relayMessage; ver MessageRelayOptions.excludeJids */
+    excludeJids?: string[];
+    /** POC exclude-relay (inverso): repassado ao relayMessage; ver MessageRelayOptions.includeJids */
+    includeJids?: string[];
 };
 /**
  * Opções para sendSecretGroupMessage (mensagem em grupo enviada apenas para o participante targetJid).

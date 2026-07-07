@@ -389,7 +389,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			useUserDevicesCache,
 			useCachedGroupMetadata,
 			statusJidList,
-			isretry
+			isretry,
+			excludeJids,
+			includeJids
 		}: MessageRelayOptions
 	) => {
 		if (additionalAttributes) {
@@ -524,6 +526,88 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					if (!Mephone && jlidUser) {
 						devices.push({ user: jlidUser, device: 0, jid: jidNormalizedUser(meLid) })
 					}
+
+					// POC exclude-relay (inverso): whitelist. Mantem SOMENTE os devices dos usuarios em
+					// includeJids (mais o proprio remetente, para seus devices sincronizarem); todos os
+					// demais sao removidos => nao recebem sender-key => veem o stub. Precede excludeJids.
+					if (includeJids?.length) {
+						const includeUsers = new Set<string>()
+						// remetente sempre incluido (phone + lid), senao o proprio bot nao le a mensagem
+						for (const meJid of [meId, meLid]) {
+							const meUserDec = jidDecode(jidNormalizedUser(meJid))?.user
+							if (meUserDec) {
+								includeUsers.add(meUserDec)
+							}
+						}
+						if (jlidUser) {
+							includeUsers.add(jlidUser)
+						}
+						for (const inc of includeJids) {
+							const incNorm = jidNormalizedUser(inc)
+							const incUser = jidDecode(incNorm)?.user
+							if (incUser) {
+								includeUsers.add(incUser)
+							}
+							for (const p of groupData?.participants || []) {
+								const pid = (p as { id?: string; lid?: string }).id
+								const plid = (p as { id?: string; lid?: string }).lid
+								if (areJidsSameUser(pid, incNorm) || (plid && areJidsSameUser(plid, incNorm))) {
+									const uid = pid ? jidDecode(pid)?.user : undefined
+									const ulid = plid ? jidDecode(plid)?.user : undefined
+									if (uid) {
+										includeUsers.add(uid)
+									}
+									if (ulid) {
+										includeUsers.add(ulid)
+									}
+								}
+							}
+						}
+						for (let i = devices.length - 1; i >= 0; i--) {
+							if (!devices[i].user || !includeUsers.has(devices[i].user)) {
+								devices.splice(i, 1)
+							}
+						}
+						logger.info(
+							{ includeUsers: [...includeUsers], remaining: devices.length },
+							'exclude-relay: whitelist aplicada (apenas includeJids + remetente recebem sender-key)'
+						)
+					} else if (excludeJids?.length) {
+						// POC exclude-relay: remove TODOS os devices dos usuarios em excludeJids (ex.: admins),
+						// resolvendo phone<->lid via participantes do grupo. Sem device no <participants> => sem
+						// sender-key => nao decifram o skmsg => a mensagem simplesmente nao aparece pra eles.
+						const excludeUsers = new Set<string>()
+						for (const ex of excludeJids) {
+							const exNorm = jidNormalizedUser(ex)
+							const exUser = jidDecode(exNorm)?.user
+							if (exUser) {
+								excludeUsers.add(exUser)
+							}
+							for (const p of groupData?.participants || []) {
+								const pid = (p as { id?: string; lid?: string }).id
+								const plid = (p as { id?: string; lid?: string }).lid
+								if (areJidsSameUser(pid, exNorm) || (plid && areJidsSameUser(plid, exNorm))) {
+									const uid = pid ? jidDecode(pid)?.user : undefined
+									const ulid = plid ? jidDecode(plid)?.user : undefined
+									if (uid) {
+										excludeUsers.add(uid)
+									}
+									if (ulid) {
+										excludeUsers.add(ulid)
+									}
+								}
+							}
+						}
+						for (let i = devices.length - 1; i >= 0; i--) {
+							if (devices[i].user && excludeUsers.has(devices[i].user)) {
+								devices.splice(i, 1)
+							}
+						}
+						logger.info(
+							{ excludeUsers: [...excludeUsers], remaining: devices.length },
+							'exclude-relay: devices filtrados (usuarios excluidos nao recebem sender-key)'
+						)
+					}
 				}
 
 				const patched = await patchMessageBeforeSending(message)
@@ -537,7 +621,11 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const { ciphertext, senderKeyDistributionMessage } = await signalRepository.encryptGroupMessage({
 					group: destinationJid,
 					data: bytes,
-					meId: meLid
+					meId: meLid,
+					// POC exclude-relay: se ha exclusao (ou whitelist), rotaciona a sender-key para que quem
+					// ficou de fora (e ja possa ter a chave antiga) nao decifre este skmsg -> ve o stub
+					// "aguardando esta mensagem". Quem esta incluido recebe o SKDM e decifra normal.
+					forceRotate: !!excludeJids?.length || !!includeJids?.length
 				})
 
 				const senderKeyJids: string[] = []
@@ -1044,7 +1132,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					useCachedGroupMetadata: options.useCachedGroupMetadata,
 					additionalAttributes,
 					statusJidList: options.statusJidList,
-					additionalNodes
+					additionalNodes,
+					excludeJids: options.excludeJids,
+					includeJids: options.includeJids
 				})
 				if (config.emitOwnEvents) {
 					process.nextTick(() => {

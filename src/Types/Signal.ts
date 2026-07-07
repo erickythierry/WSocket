@@ -28,6 +28,11 @@ type EncryptGroupMessageOpts = {
 	group: string
 	data: Uint8Array
 	meId: string
+	/**
+	 * POC exclude-relay: forca rotacao da sender-key (record esvaziado antes do create) para que
+	 * quem foi removido do <participants> nao consiga decifrar o skmsg com uma chave antiga que ja possua.
+	 */
+	forceRotate?: boolean
 }
 
 type PreKey = {

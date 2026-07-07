@@ -96,13 +96,16 @@ export function makeLibSignalRepository(auth: SignalAuthState): SignalRepository
 			const type = sigType === 3 ? 'pkmsg' : 'msg'
 			return { type, ciphertext: Buffer.from(body) }
 		},
-		async encryptGroupMessage({ group, meId, data }) {
+		async encryptGroupMessage({ group, meId, data, forceRotate }) {
 			const senderName = jidToSignalSenderKeyName(group, meId)
 			const builder = new GroupSessionBuilder(storage)
 
 			const senderNameStr = senderName.toString()
 			const { [senderNameStr]: senderKey } = await auth.keys.get('sender-key', [senderNameStr])
-			if (!senderKey) {
+			// forceRotate: sobrescreve com record vazio => create() gera keyId/seed novos => quem foi
+			// excluido do <participants> nao recebe o novo SKDM e nao decifra (forward secrecy protege
+			// tambem os envios ocultos anteriores).
+			if (!senderKey || forceRotate) {
 				await storage.storeSenderKey(senderName, new SenderKeyRecord())
 			}
 
