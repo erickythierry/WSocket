@@ -96,6 +96,16 @@ type Templatable = {
     footer?: string
 }
 
+type Interactiveable = {
+	/** Botões native flow, incluindo listas `single_select`. */
+	interactiveButtons?: proto.Message.InteractiveMessage.NativeFlowMessage.INativeFlowButton[]
+	/** Respostas rápidas convertidas para botões native flow `quick_reply`. */
+	quickReplyButtons?: QuickReplyButton[]
+	title?: string
+	subtitle?: string
+	footer?: string
+}
+
 type Editable = {
 	edit?: WAMessageKey
 }
@@ -171,6 +181,11 @@ export type ButtonReplyInfo = {
 	index: number
 }
 
+export type QuickReplyButton = {
+	displayText: string
+	id: string
+}
+
 export type GroupInviteInfo = {
 	inviteCode: string
 	inviteExpiration: number
@@ -188,7 +203,7 @@ export type AnyRegularMessageContent = (
 			text: string
 			linkPreview?: WAUrlInfo | null
 	  } & Mentionable &
-			Contextable & Buttonable & Templatable & Listable &
+			Contextable & Buttonable & Templatable & Interactiveable & Listable &
 			Editable)
 	| AnyMediaMessageContent
 	| ({

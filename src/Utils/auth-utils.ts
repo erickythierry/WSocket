@@ -25,9 +25,9 @@ export function makeCacheableSignalKeyStore(
 	logger?: ILogger,
 	_cache?: CacheStore
 ): SignalKeyStore {
-	const cache =
+	const cache: CacheStore =
 		_cache ||
-		new NodeCache({
+		new NodeCache<any>({
 			stdTTL: DEFAULT_CACHE_TTLS.SIGNAL_STORE, // 5 minutes
 			useClones: false,
 			deleteOnExpire: true

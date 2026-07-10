@@ -5,6 +5,7 @@ import { DEFAULT_CACHE_TTLS, WA_DEFAULT_EPHEMERAL } from '../Defaults'
 import ListType = proto.Message.ListMessage.ListType
 import {
 	AnyMessageContent,
+	CacheStore,
 	MediaConnInfo,
 	MessageReceiptType,
 	MessageRelayOptions,
@@ -31,7 +32,6 @@ import {
 	parseAndInjectE2ESessions,
 	unixTimestampSeconds,
 	convertlidDevice,
-	getContentType,
 	encodeNewsletterMessage
 } from '../Utils'
 import { getUrlInfo } from '../Utils/link-preview'
@@ -78,9 +78,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		groupToggleEphemeral
 	} = sock
 
-	const userDevicesCache =
+	const userDevicesCache: CacheStore =
 		config.userDevicesCache ||
-		new NodeCache({
+		new NodeCache<any>({
 			stdTTL: DEFAULT_CACHE_TTLS.USER_DEVICES,
 			useClones: false
 		})
@@ -771,22 +771,6 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				logger.debug({ jid }, 'adding device identity')
 			}
 
-			const buttonType = getButtonType(message)
-			if (buttonType) {
-				;(stanza.content as BinaryNode[]).push({
-					tag: 'biz',
-					attrs: {},
-					content: [
-						{
-							tag: buttonType,
-							attrs: getButtonArgs(message)
-						}
-					]
-				})
-
-				logger.debug({ jid }, 'adding business node')
-			}
-
 			const isPeerMessage = additionalAttributes?.['category'] === 'peer'
 			const is1on1Send = !isGroup && !isStatus && !isNewsletter && !isretry && !isPeerMessage
 			const tcTokenJid = is1on1Send ? jidNormalizedUser(destinationJid) : undefined
@@ -817,45 +801,11 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				;(stanza.content as BinaryNode[]).push(...additionalNodes)
 			}
 
-			const content = normalizeMessageContent(message)!
-			const contentType = getContentType(content)!
-
-			if (
-				isJidGroup(jid) ||
-				isJidUser(jid) ||
-				(isLidUser(jid) &&
-					(contentType === 'interactiveMessage' || contentType === 'buttonsMessage' || contentType === 'listMessage'))
-			) {
-				const bizNode: BinaryNode = { tag: 'biz', attrs: {} }
-
-				if (
-					message?.viewOnceMessage?.message?.interactiveMessage ||
-					message?.viewOnceMessageV2?.message?.interactiveMessage ||
-					message?.viewOnceMessageV2Extension?.message?.interactiveMessage ||
-					message?.interactiveMessage ||
-					message?.viewOnceMessage?.message?.buttonsMessage ||
-					message?.viewOnceMessageV2?.message?.buttonsMessage ||
-					message?.viewOnceMessageV2Extension?.message?.buttonsMessage ||
-					message?.buttonsMessage
-				) {
-					bizNode.content = [
-						{
-							tag: 'interactive',
-							attrs: {
-								type: 'native_flow',
-								v: '1'
-							},
-							content: [
-								{
-									tag: 'native_flow',
-									attrs: { v: '9', name: 'mixed' }
-								}
-							]
-						}
-					]
-				}
-
+			const hasCustomBizNode = additionalNodes?.some(node => node.tag === 'biz')
+			const bizNode = hasCustomBizNode ? undefined : getBusinessNode(message)
+			if (bizNode) {
 				;(stanza.content as BinaryNode[]).push(bizNode)
+				logger.debug({ jid }, 'adding business node')
 			}
 
 			logger.debug({ msgId }, `sending message to ${participants.length} devices`)
@@ -960,6 +910,85 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			return { v: '2', type: ListType[type].toLowerCase() }
 		} else {
 			return {}
+		}
+	}
+
+	const getBusinessNode = (message: proto.IMessage): BinaryNode | undefined => {
+		const content = normalizeMessageContent(message)
+		if (!content) {
+			return
+		}
+
+		const attrs: BinaryNodeAttributes = {
+			actual_actors: '2',
+			host_storage: '2',
+			privacy_mode_ts: unixTimestampSeconds().toString()
+		}
+		const nativeFlow = content.interactiveMessage?.nativeFlowMessage
+		const paymentFlowName = nativeFlow?.buttons?.some(button => button.name === 'payment_info')
+			? 'payment_info'
+			: nativeFlow?.buttons?.some(button => button.name === 'review_and_pay')
+				? 'order_details'
+				: undefined
+
+		if (paymentFlowName) {
+			return {
+				tag: 'biz',
+				attrs: {
+					...attrs,
+					native_flow_name: paymentFlowName
+				}
+			}
+		}
+
+		if (nativeFlow || content.buttonsMessage) {
+			return {
+				tag: 'biz',
+				attrs,
+				content: [
+					{
+						tag: 'interactive',
+						attrs: { type: 'native_flow', v: '1' },
+						content: [
+							{
+								tag: 'native_flow',
+								attrs: { v: '9', name: 'mixed' }
+							}
+						]
+					},
+					{
+						tag: 'quality_control',
+						attrs: { source_type: 'third_party' }
+					}
+				]
+			}
+		}
+
+		const buttonType = getButtonType(content)
+		if (!buttonType) {
+			return
+		}
+		if (!content.listMessage) {
+			return {
+				tag: 'biz',
+				attrs: {},
+				content: [{ tag: buttonType, attrs: getButtonArgs(content) }]
+			}
+		}
+
+		return {
+			tag: 'biz',
+			attrs,
+			content: [
+				{
+					tag: buttonType,
+					attrs: getButtonArgs(content)
+				},
+				{
+					tag: 'quality_control',
+					attrs: { source_type: 'third_party' }
+				}
+			]
 		}
 	}
 

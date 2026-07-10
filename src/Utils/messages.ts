@@ -597,6 +597,41 @@ export const generateWAMessageContent = async (
 				hydratedTemplate: msg
 			}
 		};
+	} else if (
+		('interactiveButtons' in message && !!message.interactiveButtons?.length) ||
+		('quickReplyButtons' in message && !!message.quickReplyButtons?.length)
+	) {
+		if (message.interactiveButtons?.length && message.quickReplyButtons?.length) {
+			throw new Boom('Use interactiveButtons ou quickReplyButtons, não os dois', { statusCode: 400 });
+		}
+		if (message.quickReplyButtons?.some(button => !button.displayText?.trim() || !button.id?.trim())) {
+			throw new Boom('Todo quick reply precisa de displayText e id', { statusCode: 400 });
+		}
+
+		const buttons = message.quickReplyButtons?.map(button => ({
+			name: 'quick_reply',
+			buttonParamsJson: JSON.stringify({
+				display_text: button.displayText,
+				id: button.id
+			})
+		})) || message.interactiveButtons;
+		const interactiveMessage: proto.Message.IInteractiveMessage = {
+			header: {
+				title: message.title,
+				subtitle: message.subtitle,
+				hasMediaAttachment: false
+			},
+			body: { text: message.text },
+			footer: message.footer ? { text: message.footer } : undefined,
+			nativeFlowMessage: {
+				buttons,
+				messageParamsJson: '{}',
+				messageVersion: 1
+			},
+			contextInfo: message.contextInfo
+		};
+
+		m = { interactiveMessage };
 	}
 
 	if ('sections' in message && !!message.sections) {
@@ -1046,4 +1081,3 @@ export const convertlidDevice = (jid: string, lid: string | null | undefined, me
 	const lidUser = jidDecode(lid)?.user;
 	return jidDevice ? `${lidUser}:${jidDevice}@lid` : `${lidUser}@lid`;
 }
-
