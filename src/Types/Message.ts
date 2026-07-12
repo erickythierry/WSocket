@@ -297,6 +297,12 @@ export type MessageRelayOptions = MinimalRelayOptions & {
 	 * via metadados do grupo. Usar apenas para estudo/deteccao.
 	 */
 	includeJids?: string[]
+	/**
+	 * Controla decrypt-fail="hide" no enc/skmsg de grupo. Em relays seletivos com includeJids ou
+	 * excludeJids, o padrão é true; informe false para exibir o placeholder de falha nos excluídos.
+	 * Não altera o roteamento nem a criptografia.
+	 */
+	decryptFailHide?: boolean
 }
 
 export type MiscMessageGenerationOptions = MinimalRelayOptions & {
@@ -320,6 +326,8 @@ export type MiscMessageGenerationOptions = MinimalRelayOptions & {
 	excludeJids?: string[]
 	/** POC exclude-relay (inverso): repassado ao relayMessage; ver MessageRelayOptions.includeJids */
 	includeJids?: string[]
+	/** Repassado ao relayMessage; ver MessageRelayOptions.decryptFailHide */
+	decryptFailHide?: boolean
 }
 
 /**

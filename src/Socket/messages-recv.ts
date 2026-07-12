@@ -685,6 +685,19 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 	const handleReceipt = async (node: BinaryNode) => {
 		const { attrs, content } = node
+		if (process.env.WA_POC_RELAY_TRACE === '1') {
+			logger.info(
+				{
+					id: attrs.id,
+					from: attrs.from,
+					participant: attrs.participant,
+					recipient: attrs.recipient,
+					type: attrs.type,
+					childTags: Array.isArray(content) ? content.map(child => child.tag) : []
+				},
+				'[POC relay trace] inbound receipt'
+			)
+		}
 		if (!attrs.from || !attrs.id) {
 			logger.warn({ tag: node.tag, attrs }, 'ignoring receipt with missing id/from')
 			await sendMessageAck(node)
@@ -1067,6 +1080,19 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	const tcTokenRetriedMsgIds = new Set<string>()
 
 	const handleBadAck = async ({ attrs }: BinaryNode) => {
+		if (process.env.WA_POC_RELAY_TRACE === '1') {
+			logger.info(
+				{
+					id: attrs.id,
+					from: attrs.from,
+					to: attrs.to,
+					participant: attrs.participant,
+					error: attrs.error,
+					phash: attrs.phash
+				},
+				'[POC relay trace] inbound ack'
+			)
+		}
 		if (!attrs.from || !attrs.id) {
 			logger.warn({ attrs }, 'ignoring bad ack with missing id/from')
 			return

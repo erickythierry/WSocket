@@ -65,6 +65,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		cachedGroupMetadata
 	} = config
 	const sock = makeNewsletterSocket(config)
+	const pocRelayTrace = process.env.WA_POC_RELAY_TRACE === '1'
 	const {
 		ev,
 		authState,
@@ -391,7 +392,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			statusJidList,
 			isretry,
 			excludeJids,
-			includeJids
+			includeJids,
+			decryptFailHide
 		}: MessageRelayOptions
 	) => {
 		if (additionalAttributes) {
@@ -430,6 +432,10 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		const isStatus = jid === statusJid
 		const isLid = server === 'lid'
 		const isNewsletter = server === 'newsletter'
+		// Relays seletivos ocultam por padrão a falha de decrypt nos devices que não receberam
+		// o SKDM. O chamador ainda pode usar decryptFailHide:false para observar o placeholder.
+		const shouldHideDecryptFailure =
+			decryptFailHide ?? (!!includeJids?.length || !!excludeJids?.length)
 
 		let shouldIncludeDeviceIdentity = false
 
@@ -658,7 +664,11 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 				binaryNodeContent.push({
 					tag: 'enc',
-					attrs: { v: '2', type: 'skmsg' },
+					attrs: {
+						v: '2',
+						type: 'skmsg',
+						...(shouldHideDecryptFailure ? { 'decrypt-fail': 'hide' } : {})
+					},
 					content: ciphertext
 				})
 
@@ -809,6 +819,26 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 
 			logger.debug({ msgId }, `sending message to ${participants.length} devices`)
+			if (pocRelayTrace && (isGroup || participant)) {
+				logger.info(
+					{
+						msgId,
+						to: stanza.attrs.to,
+						participant: stanza.attrs.participant,
+						isretry: !!isretry,
+						participantNodes: participants.length,
+						deviceCandidates: devices.length,
+						contentTags: Array.isArray(stanza.content) ? stanza.content.map(node => node.tag) : [],
+						hasSkmsg: binaryNodeContent.some(
+							node => node.tag === 'enc' && node.attrs.type === 'skmsg'
+						),
+						excludeCount: excludeJids?.length || 0,
+						includeCount: includeJids?.length || 0,
+						decryptFailHide: shouldHideDecryptFailure
+					},
+					'[POC relay trace] outbound stanza'
+				)
+			}
 
 			await sendNode(stanza)
 
@@ -1163,7 +1193,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					statusJidList: options.statusJidList,
 					additionalNodes,
 					excludeJids: options.excludeJids,
-					includeJids: options.includeJids
+					includeJids: options.includeJids,
+					decryptFailHide: options.decryptFailHide
 				})
 				if (config.emitOwnEvents) {
 					process.nextTick(() => {
