@@ -26,6 +26,12 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
         shouldIncludeDeviceIdentity: boolean;
     }>;
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<import("../WABinary").JidWithDevice[]>;
+    getSelectiveRelayContext: (groupJid: string, messageId: string) => {
+        groupJid: string;
+        allowedUsers: string[];
+        decryptFailHide: boolean;
+    } | undefined;
+    getSelectiveSentMessage: (groupJid: string, messageId: string) => proto.IMessage | undefined;
     updateMediaMessage: (message: proto.IWebMessageInfo) => Promise<proto.IWebMessageInfo>;
     sendMessage: (jid: string, content: import("../Types").AnyMessageContent, options?: import("../Types").MiscMessageGenerationOptions) => Promise<proto.WebMessageInfo | undefined>;
     sendSecretGroupMessage: (jid: string, messageObject: import("../Types").AnyMessageContent, options?: import("../Types").SecretGroupMessageOptions) => Promise<proto.WebMessageInfo>;

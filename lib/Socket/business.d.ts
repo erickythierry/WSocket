@@ -37,6 +37,12 @@ export declare const makeBusinessSocket: (config: SocketConfig) => {
         shouldIncludeDeviceIdentity: boolean;
     }>;
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<import("../WABinary").JidWithDevice[]>;
+    getSelectiveRelayContext: (groupJid: string, messageId: string) => {
+        groupJid: string;
+        allowedUsers: string[];
+        decryptFailHide: boolean;
+    } | undefined;
+    getSelectiveSentMessage: (groupJid: string, messageId: string) => import("../Types").WAProto.IMessage | undefined;
     updateMediaMessage: (message: import("../Types").WAProto.IWebMessageInfo) => Promise<import("../Types").WAProto.IWebMessageInfo>;
     sendMessage: (jid: string, content: import("../Types").AnyMessageContent, options?: import("../Types").MiscMessageGenerationOptions) => Promise<import("../Types").WAProto.WebMessageInfo | undefined>;
     sendSecretGroupMessage: (jid: string, messageObject: import("../Types").AnyMessageContent, options?: import("../Types").SecretGroupMessageOptions) => Promise<import("../Types").WAProto.WebMessageInfo>;

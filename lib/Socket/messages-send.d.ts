@@ -21,6 +21,12 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
         shouldIncludeDeviceIdentity: boolean;
     }>;
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<JidWithDevice[]>;
+    getSelectiveRelayContext: (groupJid: string, messageId: string) => {
+        groupJid: string;
+        allowedUsers: string[];
+        decryptFailHide: boolean;
+    } | undefined;
+    getSelectiveSentMessage: (groupJid: string, messageId: string) => proto.IMessage | undefined;
     updateMediaMessage: (message: proto.IWebMessageInfo) => Promise<proto.IWebMessageInfo>;
     sendMessage: (jid: string, content: AnyMessageContent, options?: MiscMessageGenerationOptions) => Promise<proto.WebMessageInfo | undefined>;
     /**

@@ -66,6 +66,21 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	} = config
 	const sock = makeNewsletterSocket(config)
 	const pocRelayTrace = process.env.WA_POC_RELAY_TRACE === '1'
+	type SelectiveRelayContext = {
+		groupJid: string
+		allowedUsers: string[]
+		decryptFailHide: boolean
+	}
+	// O retry chega depois do sendMessage e não carrega includeJids/excludeJids. Guardamos o
+	// conjunto resolvido (PN + LID) para recuperar apenas devices que receberam o relay original.
+	const selectiveRelayCache = new NodeCache<SelectiveRelayContext>({
+		stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY,
+		useClones: false
+	})
+	const selectiveMessageCache = new NodeCache<proto.IMessage>({
+		stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY,
+		useClones: false
+	})
 	const {
 		ev,
 		authState,
@@ -447,6 +462,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		const destinationJid = !isStatus ? jidEncode(user, isLid ? 'lid' : isGroup ? 'g.us' : 's.whatsapp.net') : statusJid
 		const binaryNodeContent: BinaryNode[] = []
 		const devices: JidWithDevice[] = []
+		let selectiveAllowedUsers: Set<string> | undefined
 
 		const extraAttrs = {}
 
@@ -569,6 +585,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 								}
 							}
 						}
+						selectiveAllowedUsers = new Set(includeUsers)
 						for (let i = devices.length - 1; i >= 0; i--) {
 							if (!devices[i].user || !includeUsers.has(devices[i].user)) {
 								devices.splice(i, 1)
@@ -603,6 +620,26 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 									}
 								}
 							}
+						}
+						selectiveAllowedUsers = new Set<string>()
+						for (const groupParticipant of groupData?.participants || []) {
+							const pid = (groupParticipant as { id?: string; lid?: string }).id
+							const plid = (groupParticipant as { id?: string; lid?: string }).lid
+							const pidUser = pid ? jidDecode(pid)?.user : undefined
+							const plidUser = plid ? jidDecode(plid)?.user : undefined
+							if (
+								(pidUser && excludeUsers.has(pidUser)) ||
+								(plidUser && excludeUsers.has(plidUser))
+							) {
+								continue
+							}
+							if (pidUser) selectiveAllowedUsers.add(pidUser)
+							if (plidUser) selectiveAllowedUsers.add(plidUser)
+						}
+						// Os próprios devices do remetente sempre recebem a sender-key.
+						for (const meJid of [meId, meLid]) {
+							const meUser = jidDecode(jidNormalizedUser(meJid))?.user
+							if (meUser) selectiveAllowedUsers.add(meUser)
 						}
 						for (let i = devices.length - 1; i >= 0; i--) {
 							if (devices[i].user && excludeUsers.has(devices[i].user)) {
@@ -841,6 +878,15 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 
 			await sendNode(stanza)
+			if (isGroup && !participant && selectiveAllowedUsers) {
+				const selectiveCacheKey = `${destinationJid}:${msgId}`
+				selectiveRelayCache.set(selectiveCacheKey, {
+					groupJid: destinationJid,
+					allowedUsers: [...selectiveAllowedUsers],
+					decryptFailHide: shouldHideDecryptFailure
+				})
+				selectiveMessageCache.set(selectiveCacheKey, message)
+			}
 
 			if (is1on1Send && tcTokenJid && shouldSendNewTcToken(tcTokenEntry?.senderTimestamp)) {
 				const issueTimestamp = unixTimestampSeconds()
@@ -1068,6 +1114,10 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		sendPeerDataOperationMessage,
 		createParticipantNodes,
 		getUSyncDevices,
+		getSelectiveRelayContext: (groupJid: string, messageId: string) =>
+			selectiveRelayCache.get(`${groupJid}:${messageId}`),
+		getSelectiveSentMessage: (groupJid: string, messageId: string) =>
+			selectiveMessageCache.get(`${groupJid}:${messageId}`),
 		updateMediaMessage: async (message: proto.IWebMessageInfo) => {
 			const content = assertMediaContent(message.message)
 			const mediaKey = content.mediaKey!
@@ -1188,7 +1238,16 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 				await relayMessage(jid, fullMsg.message!, {
 					messageId: fullMsg.key.id!,
-					useCachedGroupMetadata: options.useCachedGroupMetadata,
+					// Relays seletivos não podem depender de metadata/devices antigos: um device
+					// recém-vinculado receberia o skmsg sem o respectivo SKDM.
+					useCachedGroupMetadata:
+						options.includeJids?.length || options.excludeJids?.length
+							? false
+							: options.useCachedGroupMetadata,
+					useUserDevicesCache:
+						options.includeJids?.length || options.excludeJids?.length
+							? false
+							: options.useUserDevicesCache,
 					additionalAttributes,
 					statusJidList: options.statusJidList,
 					additionalNodes,

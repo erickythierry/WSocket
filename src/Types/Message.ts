@@ -271,6 +271,8 @@ type MinimalRelayOptions = {
 	messageId?: string
 	/** should we use group metadata cache, or fetch afresh from the server; default assumed to be "true" */
 	useCachedGroupMetadata?: boolean
+	/** should we use the cached device list; selective group relays default to false */
+	useUserDevicesCache?: boolean
 }
 
 export type MessageRelayOptions = MinimalRelayOptions & {
@@ -279,8 +281,6 @@ export type MessageRelayOptions = MinimalRelayOptions & {
 	/** additional attributes to add to the WA binary node */
 	additionalAttributes?: { [_: string]: string }
 	additionalNodes?: BinaryNode[]
-	/** should we use the devices cache, or fetch afresh from the server; default assumed to be "true" */
-	useUserDevicesCache?: boolean
 	/** jid list of participants for status@broadcast */
 	statusJidList?: string[],
 	isretry?: boolean

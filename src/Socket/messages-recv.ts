@@ -58,6 +58,7 @@ import {
 	isJidUser,
 	isLidUser,
 	jidDecode,
+	jidEncode,
 	jidNormalizedUser,
 	S_WHATSAPP_NET
 } from '../WABinary'
@@ -81,6 +82,9 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		assertSessions,
 		sendNode,
 		relayMessage,
+		getUSyncDevices,
+		getSelectiveRelayContext,
+		getSelectiveSentMessage,
 		sendReceipt,
 		uploadPreKeys,
 		sendPeerDataOperationMessage
@@ -628,13 +632,29 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		receiptNode: BinaryNode
 	) => {
 		// todo: implement a cache to store the last 256 sent messages (copy whatsmeow)
-		const msgs = await Promise.all(ids.map(id => getMessage({ ...key, id })))
 		const remoteJid = key.remoteJid!
+		const msgs = await Promise.all(
+			ids.map(async id => (await getMessage({ ...key, id })) || getSelectiveSentMessage(remoteJid, id))
+		)
 		const participant = key.participant || remoteJid
 		// if it's the primary jid sending the request
 		// just re-send the message to everyone
 		// prevents the first message decryption failure
 		const sendToAll = !jidDecode(participant)?.device
+		const participantUser = jidDecode(jidNormalizedUser(participant))?.user
+		const selectiveContexts = ids.map(id =>
+			isJidGroup(remoteJid) ? getSelectiveRelayContext(remoteJid, id) : undefined
+		)
+		const hasRetryableMessage = selectiveContexts.some(
+			context => !context || (!!participantUser && context.allowedUsers.includes(participantUser))
+		)
+		if (!hasRetryableMessage) {
+			logger.info(
+				{ remoteJid, participant, ids },
+				'ignorando retry sem mensagens acessíveis ao participante'
+			)
+			return
+		}
 
 		// Reestabelece a sessão com quem pediu o retry, senão reenviamos com a MESMA
 		// sessão que o outro lado não conseguiu decriptar e o loop nunca fecha.
@@ -668,15 +688,42 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 		for (const [i, msg] of msgs.entries()) {
 			if (msg) {
+				const selectiveContext = selectiveContexts[i]
+				if (selectiveContext) {
+					if (!participantUser || !selectiveContext.allowedUsers.includes(participantUser)) {
+						logger.info(
+							{ remoteJid, participant, messageId: ids[i] },
+							'ignorando retry de participante sem acesso ao relay seletivo'
+						)
+						continue
+					}
+				}
 				updateSendMessageAgainCount(ids[i], participant)
-				const msgRelayOpts: MessageRelayOptions = { messageId: ids[i], isretry:true }				
-					msgRelayOpts.participant = {
-						jid: participant,
-						count: +retryNode.attrs.count					
-					
+				let retryParticipants = [participant]
+				if (selectiveContext && sendToAll) {
+					// Receipts do device primário às vezes chegam sem o sufixo do device. Nesse caso,
+					// atualiza a lista e recupera todos os devices daquela conta autorizada.
+					const freshDevices = await getUSyncDevices([jidNormalizedUser(participant)], false, false)
+					retryParticipants = freshDevices.map(device => {
+						const server = jidDecode(device.jid)?.server || jidDecode(participant)?.server || 'lid'
+						return jidEncode(device.user, server, device.device)
+					})
+					if (!retryParticipants.length) retryParticipants = [participant]
 				}
 
-				await relayMessage(key.remoteJid!, msg, msgRelayOpts,)
+				for (const retryParticipant of [...new Set(retryParticipants)]) {
+					const msgRelayOpts: MessageRelayOptions = {
+						messageId: ids[i],
+						isretry: true,
+						decryptFailHide: selectiveContext?.decryptFailHide,
+						useUserDevicesCache: false,
+						participant: {
+							jid: retryParticipant,
+							count: +retryNode.attrs.count
+						}
+					}
+					await relayMessage(key.remoteJid!, msg, msgRelayOpts)
+				}
 			} else {
 				logger.debug({ jid: key.remoteJid, id: ids[i] }, 'recv retry request, but message not available')
 			}

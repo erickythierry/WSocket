@@ -220,6 +220,8 @@ type MinimalRelayOptions = {
     messageId?: string;
     /** should we use group metadata cache, or fetch afresh from the server; default assumed to be "true" */
     useCachedGroupMetadata?: boolean;
+    /** should we use the cached device list; selective group relays default to false */
+    useUserDevicesCache?: boolean;
 };
 export type MessageRelayOptions = MinimalRelayOptions & {
     /** only send to a specific participant; used when a message decryption fails for a single user */
@@ -232,8 +234,6 @@ export type MessageRelayOptions = MinimalRelayOptions & {
         [_: string]: string;
     };
     additionalNodes?: BinaryNode[];
-    /** should we use the devices cache, or fetch afresh from the server; default assumed to be "true" */
-    useUserDevicesCache?: boolean;
     /** jid list of participants for status@broadcast */
     statusJidList?: string[];
     isretry?: boolean;
