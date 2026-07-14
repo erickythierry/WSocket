@@ -624,11 +624,11 @@ export const getWAUploadToServer = (
 	{ customUploadHosts, fetchAgent, logger, options }: SocketConfig,
 	refreshMediaConn: (force: boolean) => Promise<MediaConnInfo>
 ): WAMediaUploadFunction => {
-	return async (filePath, { mediaType, fileEncSha256B64, timeoutMs }) => {
+	return async (filePath, { mediaType, fileEncSha256B64, timeoutMs, newsletter }) => {
 		// send a query JSON to obtain the url & auth token to upload our media
 		let uploadInfo = await refreshMediaConn(false)
 
-		let urls: { mediaUrl: string; directPath: string } | undefined
+		let urls: { mediaUrl: string; directPath: string; mediaId?: string } | undefined
 		const hosts = [...customUploadHosts, ...uploadInfo.hosts]
 
 		fileEncSha256B64 = encodeBase64EncodedStringForUpload(fileEncSha256B64)
@@ -637,7 +637,13 @@ export const getWAUploadToServer = (
 			logger.debug(`uploading to "${hostname}"`)
 
 			const auth = encodeURIComponent(uploadInfo.auth) // the auth token
-			const url = `https://${hostname}${MEDIA_PATH_MAP[mediaType]}/${fileEncSha256B64}?auth=${auth}&token=${fileEncSha256B64}`
+			const defaultPath = MEDIA_PATH_MAP[mediaType]
+			const mediaName = defaultPath?.split('/').filter(Boolean).at(-1)
+			if (!defaultPath || (newsletter && !mediaName)) {
+				throw new Boom(`Unsupported media type for upload: ${mediaType}`, { statusCode: 400 })
+			}
+			const uploadPath = newsletter ? `/newsletter/newsletter-${mediaName}` : defaultPath
+			const url = `https://${hostname}${uploadPath}/${fileEncSha256B64}?auth=${auth}&token=${fileEncSha256B64}`
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			let result: any
 			try {
@@ -647,7 +653,8 @@ export const getWAUploadToServer = (
 					headers: {
 						...(options.headers || {}),
 						'Content-Type': 'application/octet-stream',
-						Origin: DEFAULT_ORIGIN
+						Origin: DEFAULT_ORIGIN,
+						Referer: `${DEFAULT_ORIGIN}/`
 					},
 					httpsAgent: fetchAgent,
 					timeout: timeoutMs,
@@ -657,10 +664,12 @@ export const getWAUploadToServer = (
 				})
 				result = body.data
 
-				if (result?.url || result?.directPath) {
+				const hasMediaLocation = result?.url || result?.direct_path || result?.directPath
+				if (hasMediaLocation && (!newsletter || result?.handle)) {
 					urls = {
 						mediaUrl: result.url,
-						directPath: result.direct_path
+						directPath: result.direct_path || result.directPath,
+						mediaId: result.handle
 					}
 					break
 				} else {

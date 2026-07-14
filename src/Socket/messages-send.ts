@@ -405,6 +405,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			useUserDevicesCache,
 			useCachedGroupMetadata,
 			statusJidList,
+			newsletterMediaId,
 			isretry,
 			excludeJids,
 			includeJids,
@@ -485,7 +486,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const bytes = encodeNewsletterMessage(patched as proto.IMessage)
 				binaryNodeContent.push({
 					tag: 'plaintext',
-					attrs: {},
+					attrs: mediaType ? { mediatype: mediaType } : {},
 					content: bytes
 				})
 				const stanza: BinaryNode = {
@@ -494,11 +495,15 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 						to: jid,
 						id: msgId,
 						type: getMessageType(message),
+						...(newsletterMediaId ? { media_id: newsletterMediaId } : {}),
 						...(additionalAttributes || {})
 					},
 					content: binaryNodeContent
 				}
-				logger.debug({ msgId }, `sending newsletter message to ${jid}`)
+				logger.debug(
+					{ msgId, mediaType, hasMediaId: !!newsletterMediaId },
+					`sending newsletter message to ${jid}`
+				)
 				await sendNode(stanza)
 				return
 			}
@@ -921,6 +926,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		if (message.pollCreationMessage || message.pollCreationMessageV2 || message.pollCreationMessageV3) {
 			return 'poll'
 		}
+		if (getMediaType(message)) {
+			return 'media'
+		}
 		if (normalizeMessageContent(message)?.listMessage) {
 			return 'media'
 		}
@@ -1208,6 +1216,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const isEditMsg = 'edit' in content && !!content.edit
 				const isPinMsg = 'pin' in content && !!content.pin
 				const isPollMessage = 'poll' in content && !!content.poll
+				const newsletterMediaId = (
+					fullMsg.message as (proto.IMessage & { __newsletterMediaId?: string }) | undefined
+				)?.__newsletterMediaId
 				const additionalAttributes: BinaryNodeAttributes = {}
 				const additionalNodes: BinaryNode[] = []
 				// required for delete
@@ -1251,6 +1262,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 							: options.useUserDevicesCache,
 					additionalAttributes,
 					statusJidList: options.statusJidList,
+					newsletterMediaId,
 					additionalNodes,
 					excludeJids: options.excludeJids,
 					includeJids: options.includeJids,

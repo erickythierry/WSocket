@@ -283,6 +283,8 @@ export type MessageRelayOptions = MinimalRelayOptions & {
 	additionalNodes?: BinaryNode[]
 	/** jid list of participants for status@broadcast */
 	statusJidList?: string[],
+	/** identificador retornado pelo upload de mídia para canais */
+	newsletterMediaId?: string
 	isretry?: boolean
 	/**
 	 * POC exclude-relay: usuários (phone ou lid) cujos devices NÃO devem entrar no <participants> de um envio de grupo.
@@ -361,8 +363,8 @@ export type MessageGenerationOptionsFromContent = MiscMessageGenerationOptions &
 
 export type WAMediaUploadFunction = (
 	encFilePath: string,
-	opts: { fileEncSha256B64: string; mediaType: MediaType; timeoutMs?: number }
-) => Promise<{ mediaUrl: string; directPath: string }>
+	opts: { fileEncSha256B64: string; mediaType: MediaType; timeoutMs?: number; newsletter?: boolean }
+) => Promise<{ mediaUrl: string; directPath: string; mediaId?: string }>
 
 export type MediaGenerationOptions = {
 	logger?: ILogger

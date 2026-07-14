@@ -30,11 +30,66 @@ const parseNewsletterMetadata = (result: unknown): NewsletterMetadata | null => 
 	}
 
 	if ('id' in result && typeof result.id === 'string') {
-		return result as NewsletterMetadata
+		const raw = result as Record<string, unknown>
+		const thread =
+			typeof raw.thread_metadata === 'object' && raw.thread_metadata !== null
+				? (raw.thread_metadata as Record<string, unknown>)
+				: undefined
+		const viewer =
+			typeof raw.viewer_metadata === 'object' && raw.viewer_metadata !== null
+				? (raw.viewer_metadata as Record<string, unknown>)
+				: undefined
+		const textValue = (value: unknown): string | undefined => {
+			if (typeof value === 'string') return value
+			if (typeof value === 'object' && value !== null && typeof (value as Record<string, unknown>).text === 'string') {
+				return (value as Record<string, unknown>).text as string
+			}
+		}
+		const numberValue = (value: unknown): number | undefined => {
+			const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+			return Number.isFinite(parsed) ? parsed : undefined
+		}
+		const pictureRaw =
+			typeof thread?.picture === 'object' && thread.picture !== null
+				? (thread.picture as Record<string, unknown>)
+				: undefined
+
+		return {
+			...(raw as unknown as NewsletterMetadata),
+			id: result.id,
+			name: textValue(raw.name) || textValue(thread?.name) || '',
+			description: textValue(raw.description) || textValue(thread?.description),
+			invite: typeof raw.invite === 'string' ? raw.invite : typeof thread?.invite === 'string' ? thread.invite : undefined,
+			creation_time: numberValue(raw.creation_time) || numberValue(thread?.creation_time),
+			subscribers: numberValue(raw.subscribers) || numberValue(thread?.subscribers_count),
+			picture: pictureRaw
+				? {
+					id: typeof pictureRaw.id === 'string' ? pictureRaw.id : undefined,
+					directPath:
+						typeof pictureRaw.direct_path === 'string'
+							? pictureRaw.direct_path
+							: typeof pictureRaw.directPath === 'string'
+								? pictureRaw.directPath
+								: undefined
+				}
+				: (raw.picture as NewsletterMetadata['picture']),
+			verification:
+				raw.verification === 'VERIFIED' || raw.verification === 'UNVERIFIED'
+					? raw.verification
+					: thread?.verification === 'VERIFIED' || thread?.verification === 'UNVERIFIED'
+						? thread.verification
+						: undefined,
+			mute_state:
+				raw.mute_state === 'ON' || raw.mute_state === 'OFF'
+					? raw.mute_state
+					: viewer?.mute === 'ON' || viewer?.mute === 'OFF'
+						? viewer.mute
+						: undefined
+		}
 	}
 
 	if ('result' in result && typeof result.result === 'object' && result.result !== null && 'id' in result.result) {
-		return result.result as NewsletterMetadata
+		return parseNewsletterMetadata(result.result)
 	}
 
 	return null
@@ -98,6 +153,16 @@ export const makeNewsletterSocket = (config: SocketConfig) => {
 			}
 			const result = await executeWMexQuery<unknown>(variables, QueryIds.METADATA, XWAPaths.xwa2_newsletter_metadata)
 			return parseNewsletterMetadata(result)
+		},
+
+		/** Retorna os canais que a conta segue ou administra. */
+		newsletterSubscribed: async (): Promise<NewsletterMetadata[]> => {
+			const result = await executeWMexQuery<unknown[]>(
+				{},
+				QueryIds.SUBSCRIBED,
+				XWAPaths.xwa2_newsletter_subscribed
+			)
+			return result.map(parseNewsletterMetadata).filter((item): item is NewsletterMetadata => item !== null)
 		},
 
 		newsletterFollow: (jid: string) => {

@@ -16,6 +16,7 @@ import {
 	MessageType,
 	MessageUserReceipt,
 	WAMediaUpload,
+	WAMediaUploadFunction,
 	WAMessage,
 	WAMessageContent,
 	WAMessageStatus,
@@ -139,6 +140,7 @@ export const prepareWAMessageMedia = async (
 		!!uploadData.media.url &&
 		!!options.mediaCache &&
 		mediaType + ':' + uploadData.media.url.toString();
+	const isNewsletter = !!options.jid && isJidNewsletter(options.jid);
 
 	if (mediaType === 'document' && !uploadData.fileName) {
 		uploadData.fileName = 'file';
@@ -148,7 +150,7 @@ export const prepareWAMessageMedia = async (
 		uploadData.mimetype = MIMETYPE_MAP[mediaType];
 	}
 
-	if (cacheableKey) {
+	if (cacheableKey && !isNewsletter) {
 		const mediaBuff = options.mediaCache!.get<Buffer>(cacheableKey);
 		if (mediaBuff) {
 			logger?.debug({ cacheableKey }, 'got media cache hit');
@@ -162,7 +164,6 @@ export const prepareWAMessageMedia = async (
 		}
 	}
 
-	const isNewsletter = !!options.jid && isJidNewsletter(options.jid);
 	if (isNewsletter) {
 		logger?.info({ key: cacheableKey }, 'Preparing raw media for newsletter');
 		const { filePath, fileSha256, fileLength } = await getRawMediaUploadData(
@@ -172,13 +173,21 @@ export const prepareWAMessageMedia = async (
 		);
 
 		const fileSha256B64 = fileSha256.toString('base64');
-		const { mediaUrl, directPath } = await options.upload(filePath, {
-			fileEncSha256B64: fileSha256B64,
-			mediaType: mediaType,
-			timeoutMs: options.mediaUploadTimeoutMs
-		});
-
-		await fs.unlink(filePath);
+		let uploaded: Awaited<ReturnType<WAMediaUploadFunction>>;
+		try {
+			uploaded = await options.upload(filePath, {
+				fileEncSha256B64: fileSha256B64,
+				mediaType: mediaType,
+				timeoutMs: options.mediaUploadTimeoutMs,
+				newsletter: true
+			});
+		} finally {
+			await fs.unlink(filePath).catch(() => undefined);
+		}
+		const { mediaUrl, directPath, mediaId } = uploaded;
+		if (!mediaId) {
+			throw new Boom('Newsletter media upload did not return a handle', { statusCode: 500 });
+		}
 
 		const obj = WAProto.Message.fromObject({
 			[`${mediaType}Message`]: MessageTypeProto[mediaType].fromObject({
@@ -190,15 +199,16 @@ export const prepareWAMessageMedia = async (
 				media: undefined
 			})
 		});
+		// O handle não pertence ao protobuf; o sendMessage o retira antes de codificar
+		// e o envia no atributo media_id do stanza da newsletter.
+		Object.defineProperty(obj, '__newsletterMediaId', {
+			value: mediaId,
+			enumerable: false
+		});
 
 		if (uploadData.ptv) {
 			obj.ptvMessage = obj.videoMessage;
 			delete obj.videoMessage;
-		}
-
-		if (cacheableKey) {
-			logger?.debug({ cacheableKey }, 'set cache');
-			options.mediaCache!.set(cacheableKey, WAProto.Message.encode(obj).finish());
 		}
 
 		return obj;
@@ -686,6 +696,7 @@ export const generateWAMessageFromContent = (
 	message: WAMessageContent,
 	options: MessageGenerationOptionsFromContent
 ) => {
+	const newsletterMediaId = (message as WAMessageContent & { __newsletterMediaId?: string }).__newsletterMediaId;
 	// set timestamp to now
 	// if not specified
 	if (!options.timestamp) {
@@ -757,7 +768,14 @@ export const generateWAMessageFromContent = (
 		participant: isJidGroup(jid) || isJidStatusBroadcast(jid) ? userJid : undefined,
 		status: WAMessageStatus.PENDING
 	};
-	return WAProto.WebMessageInfo.fromObject(messageJSON);
+	const result = WAProto.WebMessageInfo.fromObject(messageJSON);
+	if (newsletterMediaId && result.message) {
+		Object.defineProperty(result.message, '__newsletterMediaId', {
+			value: newsletterMediaId,
+			enumerable: false
+		});
+	}
+	return result;
 };
 
 export const generateWAMessage = async (jid: string, content: AnyMessageContent, options: MessageGenerationOptions) => {

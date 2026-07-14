@@ -7,6 +7,8 @@ export declare const makeNewsletterSocket: (config: SocketConfig) => {
         subscribers: number;
     }>;
     newsletterMetadata: (type: "invite" | "jid", key: string) => Promise<NewsletterMetadata | null>;
+    /** Retorna os canais que a conta segue ou administra. */
+    newsletterSubscribed: () => Promise<NewsletterMetadata[]>;
     newsletterFollow: (jid: string) => Promise<unknown>;
     newsletterUnfollow: (jid: string) => Promise<unknown>;
     newsletterMute: (jid: string) => Promise<unknown>;
