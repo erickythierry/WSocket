@@ -709,6 +709,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					attrs: {
 						v: '2',
 						type: 'skmsg',
+						...extraAttrs,
 						...(shouldHideDecryptFailure ? { 'decrypt-fail': 'hide' } : {})
 					},
 					content: ciphertext
