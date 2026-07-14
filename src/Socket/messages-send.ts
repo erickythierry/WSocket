@@ -921,11 +921,16 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		if (message.pollCreationMessage || message.pollCreationMessageV2 || message.pollCreationMessageV3) {
 			return 'poll'
 		}
+		if (normalizeMessageContent(message)?.listMessage) {
+			return 'media'
+		}
 
 		return 'text'
 	}
 
 	const getMediaType = (message: proto.IMessage) => {
+		message = normalizeMessageContent(message) || message
+
 		if (message.imageMessage) {
 			return 'image'
 		} else if (message.videoMessage) {
@@ -983,7 +988,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				throw new Boom('Expected list type inside message')
 			}
 
-			return { v: '2', type: ListType[type].toLowerCase() }
+			return { v: '2', type: type === ListType.SINGLE_SELECT ? 'product_list' : ListType[type].toLowerCase() }
 		} else {
 			return {}
 		}
@@ -1054,15 +1059,11 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 		return {
 			tag: 'biz',
-			attrs,
+			attrs: {},
 			content: [
 				{
 					tag: buttonType,
 					attrs: getButtonArgs(content)
-				},
-				{
-					tag: 'quality_control',
-					attrs: { source_type: 'third_party' }
 				}
 			]
 		}

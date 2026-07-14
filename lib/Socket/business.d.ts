@@ -1,7 +1,8 @@
-import { GetCatalogOptions, ProductCreate, ProductUpdate, SocketConfig } from '../Types';
+import { AnyMessageContent, GetCatalogOptions, ProductCreate, ProductUpdate, SocketConfig, StatusMessageOptions } from '../Types';
 import { BinaryNode } from '../WABinary';
 export declare const makeBusinessSocket: (config: SocketConfig) => {
     logger: import("../Utils/logger").ILogger;
+    sendStatus: (content: AnyMessageContent, options: StatusMessageOptions) => Promise<import("../Types").WAProto.WebMessageInfo | undefined>;
     getOrderDetails: (orderId: string, tokenBase64: string) => Promise<import("../Types").OrderDetails>;
     getCatalog: ({ jid, limit, cursor }: GetCatalogOptions) => Promise<{
         products: import("../Types").Product[];
@@ -44,8 +45,8 @@ export declare const makeBusinessSocket: (config: SocketConfig) => {
     } | undefined;
     getSelectiveSentMessage: (groupJid: string, messageId: string) => import("../Types").WAProto.IMessage | undefined;
     updateMediaMessage: (message: import("../Types").WAProto.IWebMessageInfo) => Promise<import("../Types").WAProto.IWebMessageInfo>;
-    sendMessage: (jid: string, content: import("../Types").AnyMessageContent, options?: import("../Types").MiscMessageGenerationOptions) => Promise<import("../Types").WAProto.WebMessageInfo | undefined>;
-    sendSecretGroupMessage: (jid: string, messageObject: import("../Types").AnyMessageContent, options?: import("../Types").SecretGroupMessageOptions) => Promise<import("../Types").WAProto.WebMessageInfo>;
+    sendMessage: (jid: string, content: AnyMessageContent, options?: import("../Types").MiscMessageGenerationOptions) => Promise<import("../Types").WAProto.WebMessageInfo | undefined>;
+    sendSecretGroupMessage: (jid: string, messageObject: AnyMessageContent, options?: import("../Types").SecretGroupMessageOptions) => Promise<import("../Types").WAProto.WebMessageInfo>;
     newsletterCreate: (name: string, description?: string) => Promise<import("../Types").NewsletterMetadata>;
     newsletterUpdate: (jid: string, updates: import("../Types").NewsletterUpdate) => Promise<unknown>;
     newsletterSubscribers: (jid: string) => Promise<{

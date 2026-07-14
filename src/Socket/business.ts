@@ -1,4 +1,11 @@
-import { GetCatalogOptions, ProductCreate, ProductUpdate, SocketConfig } from '../Types'
+import {
+	AnyMessageContent,
+	GetCatalogOptions,
+	ProductCreate,
+	ProductUpdate,
+	SocketConfig,
+	StatusMessageOptions
+} from '../Types'
 import {
 	parseCatalogNode,
 	parseCollectionsNode,
@@ -7,13 +14,40 @@ import {
 	toProductNode,
 	uploadingNecessaryImagesOfProduct
 } from '../Utils/business'
-import { BinaryNode, jidNormalizedUser, S_WHATSAPP_NET } from '../WABinary'
+import { BinaryNode, isJidUser, isLidUser, jidNormalizedUser, S_WHATSAPP_NET, STORIES_JID } from '../WABinary'
 import { getBinaryNodeChild } from '../WABinary/generic-utils'
 import { makeMessagesRecvSocket } from './messages-recv'
 
 export const makeBusinessSocket = (config: SocketConfig) => {
 	const sock = makeMessagesRecvSocket(config)
 	const { authState, query, waUploadToServer } = sock
+
+	/** Publica texto, imagem ou vídeo no Status do WhatsApp. */
+	const sendStatus = async (content: AnyMessageContent, options: StatusMessageOptions) => {
+		const isSupportedContent =
+			typeof content === 'object' && content !== null && ('text' in content || 'image' in content || 'video' in content)
+		if (!isSupportedContent) {
+			throw new TypeError('sendStatus aceita apenas conteúdo de texto, imagem ou vídeo')
+		}
+
+		const statusJidList = [
+			...new Set(
+				(options?.statusJidList || [])
+					.map(jidNormalizedUser)
+					.filter(jid => isJidUser(jid) || isLidUser(jid))
+			)
+		]
+		if (!statusJidList.length) {
+			throw new TypeError('options.statusJidList deve conter ao menos um contato válido')
+		}
+
+		const { statusJidList: _statusJidList, ...messageOptions } = options
+		return sock.sendMessage(STORIES_JID, content, {
+			...messageOptions,
+			broadcast: true,
+			statusJidList
+		})
+	}
 
 	const getCatalog = async ({ jid, limit, cursor }: GetCatalogOptions) => {
 		jid = jid || authState.creds.me?.id
@@ -272,6 +306,7 @@ export const makeBusinessSocket = (config: SocketConfig) => {
 	return {
 		...sock,
 		logger: config.logger,
+		sendStatus,
 		getOrderDetails,
 		getCatalog,
 		getCollections,

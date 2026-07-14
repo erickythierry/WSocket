@@ -1,6 +1,7 @@
 import { UserFacingSocketConfig } from '../Types';
 declare const makeWASocket: (config: UserFacingSocketConfig) => {
     logger: import("../Utils/logger").ILogger;
+    sendStatus: (content: import("../Types").AnyMessageContent, options: import("../Types").StatusMessageOptions) => Promise<import("../Types").WAProto.WebMessageInfo | undefined>;
     getOrderDetails: (orderId: string, tokenBase64: string) => Promise<import("../Types").OrderDetails>;
     getCatalog: ({ jid, limit, cursor }: import("../Types").GetCatalogOptions) => Promise<{
         products: import("../Types").Product[];

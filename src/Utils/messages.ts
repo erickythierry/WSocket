@@ -647,14 +647,17 @@ export const generateWAMessageContent = async (
 		m = { listMessage };
 	}
 
-	if ('viewOnce' in message && !!message.viewOnce) {
+	// ListMessage legado deve ir diretamente na raiz. O wrapper view-once faz
+	// alguns clientes ignorarem a lista e pode ser rejeitado pelo servidor.
+	if ('viewOnce' in message && !!message.viewOnce && !('sections' in message && !!message.sections)) {
 		m = { viewOnceMessage: { message: m } };
 	}
 
 	if ('mentions' in message && message.mentions?.length) {
-		const [messageType] = Object.keys(m);
-		m[messageType].contextInfo = m[messageType].contextInfo || {};
-		m[messageType].contextInfo.mentionedJid = message.mentions;
+		const content = normalizeMessageContent(m) || m;
+		const [messageType] = Object.keys(content);
+		content[messageType].contextInfo = content[messageType].contextInfo || {};
+		content[messageType].contextInfo.mentionedJid = message.mentions;
 	}
 
 	if ('edit' in message) {
@@ -669,9 +672,10 @@ export const generateWAMessageContent = async (
 	}
 
 	if ('contextInfo' in message && !!message.contextInfo) {
-		const [messageType] = Object.keys(m);
-		m[messageType] = m[messageType] || {};
-		m[messageType].contextInfo = message.contextInfo;
+		const content = normalizeMessageContent(m) || m;
+		const [messageType] = Object.keys(content);
+		content[messageType] = content[messageType] || {};
+		content[messageType].contextInfo = message.contextInfo;
 	}
 
 	return WAProto.Message.fromObject(m);

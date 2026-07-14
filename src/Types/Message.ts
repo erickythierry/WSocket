@@ -330,6 +330,12 @@ export type MiscMessageGenerationOptions = MinimalRelayOptions & {
 	decryptFailHide?: boolean
 }
 
+/** Opções para publicar texto, imagem ou vídeo em status@broadcast. */
+export type StatusMessageOptions = Omit<MiscMessageGenerationOptions, 'statusJidList' | 'broadcast'> & {
+	/** Contatos que poderão descriptografar e visualizar o status. */
+	statusJidList: string[]
+}
+
 /**
  * Opções para sendSecretGroupMessage (mensagem em grupo enviada apenas para o participante targetJid).
  * Deve ser usado apenas em grupos.
