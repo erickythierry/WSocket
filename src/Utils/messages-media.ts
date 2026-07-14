@@ -434,9 +434,14 @@ export const encryptedStream = async (
 
 		encFileWriteStream.write(mac)
 
+		const encFileFinished = once(encFileWriteStream, 'finish')
+		const originalFileFinished = originalFileStream ? once(originalFileStream, 'finish') : Promise.resolve()
+
 		encFileWriteStream.end()
-		originalFileStream?.end?.()
+		originalFileStream?.end()
 		stream.destroy()
+
+		await Promise.all([encFileFinished, originalFileFinished])
 
 		logger?.debug('encrypted data successfully')
 
