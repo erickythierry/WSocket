@@ -49089,6 +49089,7 @@ $root.proto = (function() {
          * @property {string|null} [companionMetaNonce] HistorySync companionMetaNonce
          * @property {Uint8Array|null} [shareableChatIdentifierEncryptionKey] HistorySync shareableChatIdentifierEncryptionKey
          * @property {Array.<proto.IAccount>|null} [accounts] HistorySync accounts
+         * @property {Uint8Array|null} [nctSalt] HistorySync nctSalt
          */
 
         /**
@@ -49250,6 +49251,14 @@ $root.proto = (function() {
          */
         HistorySync.prototype.accounts = $util.emptyArray;
 
+        /**
+         * HistorySync nctSalt.
+         * @member {Uint8Array|null|undefined} nctSalt
+         * @memberof proto.HistorySync
+         * @instance
+         */
+        HistorySync.prototype.nctSalt = null;
+
         // OneOf field names bound to virtual getters and setters
         var $oneOfFields;
 
@@ -49366,6 +49375,8 @@ $root.proto = (function() {
             if (message.accounts != null && message.accounts.length)
                 for (var i = 0; i < message.accounts.length; ++i)
                     $root.proto.Account.encode(message.accounts[i], writer.uint32(/* id 18, wireType 2 =*/146).fork()).ldelim();
+            if (message.nctSalt != null && Object.hasOwnProperty.call(message, "nctSalt"))
+                writer.uint32(/* id 19, wireType 2 =*/154).bytes(message.nctSalt);
             return writer;
         };
 
@@ -49482,6 +49493,10 @@ $root.proto = (function() {
                         if (!(message.accounts && message.accounts.length))
                             message.accounts = [];
                         message.accounts.push($root.proto.Account.decode(reader, reader.uint32()));
+                        break;
+                    }
+                case 19: {
+                        message.nctSalt = reader.bytes();
                         break;
                     }
                 default:
@@ -49654,6 +49669,9 @@ $root.proto = (function() {
                         return "accounts." + error;
                 }
             }
+            if (message.nctSalt != null && message.hasOwnProperty("nctSalt"))
+                if (!(message.nctSalt && typeof message.nctSalt.length === "number" || $util.isString(message.nctSalt)))
+                    return "nctSalt: buffer expected";
             return null;
         };
 
@@ -49824,6 +49842,11 @@ $root.proto = (function() {
                     message.accounts[i] = $root.proto.Account.fromObject(object.accounts[i]);
                 }
             }
+            if (object.nctSalt != null)
+                if (typeof object.nctSalt === "string")
+                    $util.base64.decode(object.nctSalt, message.nctSalt = $util.newBuffer($util.base64.length(object.nctSalt)), 0);
+                else if (object.nctSalt.length >= 0)
+                    message.nctSalt = object.nctSalt;
             return message;
         };
 
@@ -49934,6 +49957,8 @@ $root.proto = (function() {
                 for (var j = 0; j < message.accounts.length; ++j)
                     object.accounts[j] = $root.proto.Account.toObject(message.accounts[j], options);
             }
+            if (message.nctSalt != null && message.hasOwnProperty("nctSalt"))
+                object.nctSalt = options.bytes === String ? $util.base64.encode(message.nctSalt, 0, message.nctSalt.length) : options.bytes === Array ? Array.prototype.slice.call(message.nctSalt) : message.nctSalt;
             return object;
         };
 
@@ -133494,6 +133519,7 @@ $root.proto = (function() {
          * @property {proto.SyncActionValue.ILidContactAction|null} [lidContactAction] SyncActionValue lidContactAction
          * @property {proto.SyncActionValue.ICtwaPerCustomerDataSharingAction|null} [ctwaPerCustomerDataSharingAction] SyncActionValue ctwaPerCustomerDataSharingAction
          * @property {proto.SyncActionValue.IPaymentTosAction|null} [paymentTosAction] SyncActionValue paymentTosAction
+         * @property {proto.INctSaltSyncAction|null} [nctSaltSyncAction] SyncActionValue nctSaltSyncAction
          */
 
         /**
@@ -133966,6 +133992,14 @@ $root.proto = (function() {
          * @instance
          */
         SyncActionValue.prototype.paymentTosAction = null;
+
+        /**
+         * SyncActionValue nctSaltSyncAction.
+         * @member {proto.INctSaltSyncAction|null|undefined} nctSaltSyncAction
+         * @memberof proto.SyncActionValue
+         * @instance
+         */
+        SyncActionValue.prototype.nctSaltSyncAction = null;
 
         // OneOf field names bound to virtual getters and setters
         var $oneOfFields;
@@ -134450,6 +134484,8 @@ $root.proto = (function() {
                 $root.proto.SyncActionValue.CtwaPerCustomerDataSharingAction.encode(message.ctwaPerCustomerDataSharingAction, writer.uint32(/* id 62, wireType 2 =*/498).fork()).ldelim();
             if (message.paymentTosAction != null && Object.hasOwnProperty.call(message, "paymentTosAction"))
                 $root.proto.SyncActionValue.PaymentTosAction.encode(message.paymentTosAction, writer.uint32(/* id 63, wireType 2 =*/506).fork()).ldelim();
+            if (message.nctSaltSyncAction != null && Object.hasOwnProperty.call(message, "nctSaltSyncAction"))
+                $root.proto.NctSaltSyncAction.encode(message.nctSaltSyncAction, writer.uint32(/* id 80, wireType 2 =*/642).fork()).ldelim();
             return writer;
         };
 
@@ -134710,6 +134746,10 @@ $root.proto = (function() {
                     }
                 case 63: {
                         message.paymentTosAction = $root.proto.SyncActionValue.PaymentTosAction.decode(reader, reader.uint32());
+                        break;
+                    }
+                case 80: {
+                        message.nctSaltSyncAction = $root.proto.NctSaltSyncAction.decode(reader, reader.uint32());
                         break;
                     }
                 default:
@@ -135201,6 +135241,11 @@ $root.proto = (function() {
                         return "paymentTosAction." + error;
                 }
             }
+            if (message.nctSaltSyncAction != null && message.hasOwnProperty("nctSaltSyncAction")) {
+                var error = $root.proto.NctSaltSyncAction.verify(message.nctSaltSyncAction);
+                if (error)
+                    return "nctSaltSyncAction." + error;
+            }
             return null;
         };
 
@@ -135504,6 +135549,11 @@ $root.proto = (function() {
                 if (typeof object.paymentTosAction !== "object")
                     throw TypeError(".proto.SyncActionValue.paymentTosAction: object expected");
                 message.paymentTosAction = $root.proto.SyncActionValue.PaymentTosAction.fromObject(object.paymentTosAction);
+            }
+            if (object.nctSaltSyncAction != null) {
+                if (typeof object.nctSaltSyncAction !== "object")
+                    throw TypeError(".proto.SyncActionValue.nctSaltSyncAction: object expected");
+                message.nctSaltSyncAction = $root.proto.NctSaltSyncAction.fromObject(object.nctSaltSyncAction);
             }
             return message;
         };
@@ -135809,6 +135859,8 @@ $root.proto = (function() {
                 if (options.oneofs)
                     object._paymentTosAction = "paymentTosAction";
             }
+            if (message.nctSaltSyncAction != null && message.hasOwnProperty("nctSaltSyncAction"))
+                object.nctSaltSyncAction = $root.proto.NctSaltSyncAction.toObject(message.nctSaltSyncAction, options);
             return object;
         };
 
@@ -151069,6 +151121,100 @@ $root.proto = (function() {
         })();
 
         return SyncActionValue;
+    })();
+
+    proto.NctSaltSyncAction = (function() {
+
+        function NctSaltSyncAction(properties) {
+            if (properties)
+                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null)
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        NctSaltSyncAction.prototype.salt = null;
+
+        NctSaltSyncAction.create = function create(properties) {
+            return new NctSaltSyncAction(properties);
+        };
+
+        NctSaltSyncAction.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.salt != null && Object.hasOwnProperty.call(message, "salt"))
+                writer.uint32(10).bytes(message.salt);
+            return writer;
+        };
+
+        NctSaltSyncAction.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer).ldelim();
+        };
+
+        NctSaltSyncAction.decode = function decode(reader, length) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.proto.NctSaltSyncAction();
+            while (reader.pos < end) {
+                var tag = reader.uint32();
+                switch (tag >>> 3) {
+                case 1:
+                    message.salt = reader.bytes();
+                    break;
+                default:
+                    reader.skipType(tag & 7);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        NctSaltSyncAction.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        NctSaltSyncAction.verify = function verify(message) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (message.salt != null && message.hasOwnProperty("salt"))
+                if (!(message.salt && typeof message.salt.length === "number" || $util.isString(message.salt)))
+                    return "salt: buffer expected";
+            return null;
+        };
+
+        NctSaltSyncAction.fromObject = function fromObject(object) {
+            if (object instanceof $root.proto.NctSaltSyncAction)
+                return object;
+            var message = new $root.proto.NctSaltSyncAction();
+            if (object.salt != null)
+                if (typeof object.salt === "string")
+                    $util.base64.decode(object.salt, message.salt = $util.newBuffer($util.base64.length(object.salt)), 0);
+                else if (object.salt.length >= 0)
+                    message.salt = object.salt;
+            return message;
+        };
+
+        NctSaltSyncAction.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            var object = {};
+            if (message.salt != null && message.hasOwnProperty("salt"))
+                object.salt = options.bytes === String ? $util.base64.encode(message.salt, 0, message.salt.length) : options.bytes === Array ? Array.prototype.slice.call(message.salt) : message.salt;
+            return object;
+        };
+
+        NctSaltSyncAction.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        NctSaltSyncAction.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+            if (typeUrlPrefix === undefined)
+                typeUrlPrefix = "type.googleapis.com";
+            return typeUrlPrefix + "/proto.NctSaltSyncAction";
+        };
+
+        return NctSaltSyncAction;
     })();
 
     proto.SyncdIndex = (function() {

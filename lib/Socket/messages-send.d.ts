@@ -1,10 +1,17 @@
 import { Boom } from '@hapi/boom';
 import { proto } from '../../WAProto';
 import { AnyMessageContent, MediaConnInfo, MessageReceiptType, MessageRelayOptions, MiscMessageGenerationOptions, SecretGroupMessageOptions, SocketConfig, WAMessageKey } from '../Types';
+import { type LidResolver } from '../Utils/tc-token-utils';
 import { BinaryNode, JidWithDevice } from '../WABinary';
 import { USyncQuery } from '../WAUSync';
 export declare const makeMessagesSocket: (config: SocketConfig) => {
     getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<any>;
+    getLidForPn: LidResolver;
+    cacheLidMapping: (pnJid?: string, lidJid?: string) => void;
+    tcTokenStorageJid: (jid: string) => string;
+    trackTcTokenJid: (jid: string) => void;
+    flushTcTokenIndex: () => Promise<void>;
+    withFlushedTcTokenIndex: <T>(task: () => Promise<T>) => Promise<T>;
     assertSessions: (jids: string[], force: boolean, lids?: string) => Promise<boolean>;
     relayMessage: (jid: string, message: proto.IMessage, { messageId: msgId, participant, additionalAttributes, additionalNodes, useUserDevicesCache, useCachedGroupMetadata, statusJidList, newsletterMediaId, isretry, excludeJids, includeJids, decryptFailHide }: MessageRelayOptions) => Promise<string>;
     sendReceipt: (jid: string, participant: string | undefined, messageIds: string[], type: MessageReceiptType) => Promise<void>;
@@ -130,7 +137,9 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
     updateGroupsAddPrivacy: (value: import("../Types").WAPrivacyGroupAddValue) => Promise<void>;
     updateDefaultDisappearingMode: (duration: number) => Promise<void>;
     getBusinessProfile: (jid: string) => Promise<import("../Types").WABusinessProfile | void>;
-    resyncAppState: (collections: readonly ("critical_unblock_low" | "regular_high" | "regular_low" | "critical_block" | "regular")[], isInitialSync: boolean) => Promise<void>;
+    resyncAppState: (collections: readonly ("critical_unblock_low" | "regular_high" | "regular_low" | "critical_block" | "regular")[], isInitialSync: boolean) => Promise<{
+        failedCollections: import("../Types").WAPatchName[];
+    }>;
     chatModify: (mod: import("../Types").ChatModification, jid: string) => Promise<void>;
     cleanDirtyBits: (type: "account_sync" | "groups", fromTimestamp?: number | string) => Promise<void>;
     addOrEditContact: (jid: string, contact: proto.SyncActionValue.IContactAction) => Promise<void>;

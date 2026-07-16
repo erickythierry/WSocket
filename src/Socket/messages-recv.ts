@@ -46,6 +46,14 @@ import {
 } from '../Utils'
 import { makeMutex } from '../Utils/make-mutex'
 import {
+	buildTcTokenIndexEntry,
+	isTcTokenExpired,
+	readLastTcTokenPruneTs,
+	readTcTokenIndex,
+	storeTcTokensFromIqResult,
+	TC_TOKEN_INDEX_KEY
+} from '../Utils/tc-token-utils'
+import {
 	areJidsSameUser,
 	BinaryNode,
 	getAllBinaryNodeChildren,
@@ -87,11 +95,95 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		getSelectiveSentMessage,
 		sendReceipt,
 		uploadPreKeys,
-		sendPeerDataOperationMessage
+		sendPeerDataOperationMessage,
+		getLidForPn,
+		cacheLidMapping,
+		tcTokenStorageJid,
+		trackTcTokenJid,
+		flushTcTokenIndex,
+		withFlushedTcTokenIndex
 	} = sock
 
 	/** this mutex ensures that each retryRequest will wait for the previous one to finish */
 	const retryMutex = makeMutex()
+
+	const TC_TOKEN_PRUNE_BATCH = 20
+	const TC_TOKEN_PRUNE_INTERVAL = 24 * 60 * 60
+	const TC_TOKEN_PRUNE_MAX_JITTER_MS = 15 * 60 * 1000
+	let tcTokenPruneInFlight = false
+	let tcTokenPruneTimer: ReturnType<typeof setTimeout> | undefined
+
+	function scheduleTcTokenPrune() {
+		if (tcTokenPruneTimer || tcTokenPruneInFlight) return
+		tcTokenPruneTimer = setTimeout(() => {
+			tcTokenPruneTimer = undefined
+			void maybePruneExpiredTcTokens()
+		}, Math.floor(Math.random() * TC_TOKEN_PRUNE_MAX_JITTER_MS))
+	}
+
+	async function maybePruneExpiredTcTokens() {
+		if (tcTokenPruneInFlight) return
+		tcTokenPruneInFlight = true
+		try {
+			const lastPrune = await readLastTcTokenPruneTs(authState.keys)
+			if (unixTimestampSeconds() - lastPrune >= TC_TOKEN_PRUNE_INTERVAL) {
+				await withFlushedTcTokenIndex(runPruneExpiredTcTokens)
+			}
+		} catch (err) {
+			logger.warn({ err: (err as Error)?.message }, 'falha ao executar prune de tctokens')
+		} finally {
+			tcTokenPruneInFlight = false
+		}
+	}
+
+	async function runPruneExpiredTcTokens() {
+		const persisted = await readTcTokenIndex(authState.keys)
+		if (!persisted.length) {
+			await authState.keys.set({
+				tctoken: { [TC_TOKEN_INDEX_KEY]: buildTcTokenIndexEntry([], unixTimestampSeconds()) }
+			})
+			return
+		}
+
+		type TcTokenWrite = null | { token: Buffer; timestamp?: string; senderTimestamp?: number }
+		const survivors = new Set<string>()
+		let mutated = 0
+		for (let offset = 0; offset < persisted.length; offset += TC_TOKEN_PRUNE_BATCH) {
+			const batch = persisted.slice(offset, offset + TC_TOKEN_PRUNE_BATCH)
+			const tokens = await authState.keys.get('tctoken', batch)
+			const writes: Record<string, TcTokenWrite> = {}
+
+			for (const jid of batch) {
+				const entry = tokens[jid]
+				if (!entry) {
+					mutated += 1
+					continue
+				}
+
+				const keepPeerToken = !!entry.token?.length && !isTcTokenExpired(entry.timestamp)
+				const keepSenderTs = entry.senderTimestamp !== undefined && !isTcTokenExpired(entry.senderTimestamp)
+				if (!keepPeerToken && !keepSenderTs) {
+					writes[jid] = null
+					mutated += 1
+				} else if (!keepPeerToken && keepSenderTs && entry.token?.length) {
+					writes[jid] = { token: Buffer.alloc(0), senderTimestamp: entry.senderTimestamp }
+					survivors.add(jid)
+					mutated += 1
+				} else {
+					survivors.add(jid)
+				}
+			}
+
+			if (Object.keys(writes).length) await authState.keys.set({ tctoken: writes })
+		}
+
+		await authState.keys.set({
+			tctoken: {
+				[TC_TOKEN_INDEX_KEY]: buildTcTokenIndexEntry(survivors, unixTimestampSeconds())
+			}
+		})
+		logger.debug({ mutated, remaining: survivors.size }, 'tctokens expirados removidos')
+	}
 
 	const msgRetryCache: CacheStore =
 		config.msgRetryCounterCache ||
@@ -377,42 +469,32 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		const from = jidNormalizedUser(node.attrs.from)
 
 		switch (nodeType) {
-			case 'privacy_token':
-				const tokenList = getBinaryNodeChildren(child, 'token')
-				const issueTimestamp = unixTimestampSeconds()
-				for (const { attrs, content } of tokenList) {
-					const jid = attrs.jid
-					ev.emit('chats.update', [
-						{
-							id: jid,
-							tcToken: content as Buffer
-						}
-					])
+			case 'privacy_token': {
+				const senderPn = node.attrs.sender_pn || (isJidUser(node.attrs.from) ? node.attrs.from : undefined)
+				const senderLid = node.attrs.sender_lid || (isLidUser(node.attrs.from) ? node.attrs.from : undefined)
+				cacheLidMapping(senderPn, senderLid)
 
-					if (attrs.type === 'trusted_contact' && content instanceof Buffer) {
-						const storageJid = jidNormalizedUser(jid)
-						const existing = await authState.keys.get('contacts-tc-token', [storageJid])
-						const existingEntry = existing[storageJid]
-						const incomingTs = attrs.t ? Number(attrs.t) : 0
-						const existingTs = existingEntry?.timestamp ? Number(existingEntry.timestamp) : 0
-						if (incomingTs && (existingTs === 0 || incomingTs >= existingTs)) {
-							await authState.keys.set({
-								'contacts-tc-token': {
-									[storageJid]: {
-										...existingEntry,
-										token: content,
-										timestamp: attrs.t,
-										senderTimestamp: existingEntry?.senderTimestamp ?? issueTimestamp
-									}
-								}
-							})
-						}
-					}
+				const fallbackJid = senderLid || tcTokenStorageJid(from)
+				const storedJids = await storeTcTokensFromIqResult({
+					result: node,
+					fallbackJid,
+					keys: authState.keys,
+					resolveLid: getLidForPn,
+					onNewJidStored: trackTcTokenJid
+				})
 
-					logger.debug({ jid }, 'got privacy token update')
+				for (const { attrs, content } of getBinaryNodeChildren(child, 'token')) {
+					ev.emit('chats.update', [{ id: attrs.jid, tcToken: content as Buffer }])
 				}
 
+				for (const storageJid of storedJids) {
+					logger.info(
+						{ event: 'tc_token_received', from, storageJid },
+						'tc token recebido e persistido'
+					)
+				}
 				break
+			}
 			case 'newsletter':
 				await handleNewsletterNotification(node)
 				break
@@ -1003,7 +1085,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			])
 		} catch (error) {
 			sendMessageAck(node)
-			logger.error({ error, node }, 'error in handling message')
+		logger.error({ err: error, node }, 'error in handling message')
 		}
 	}
 
@@ -1123,9 +1205,6 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		await sendMessageAck(node)
 	}
 
-	/** tracks message ids already retried after error 463 — prevents retry loops */
-	const tcTokenRetriedMsgIds = new Set<string>()
-
 	const handleBadAck = async ({ attrs }: BinaryNode) => {
 		if (process.env.WA_POC_RELAY_TRACE === '1') {
 			logger.info(
@@ -1165,29 +1244,17 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		// device could not display the message
 		if (attrs.error) {
 			if (attrs.error === SERVER_ERROR_CODES.MissingTcToken) {
-				// Single retry: the original sendNode triggered a tctoken issuance.
-				// After a brief delay the server should have pushed a privacy_token
-				// notification, making the re-send succeed.
-				const msgId = attrs.id
-				const jid = jidNormalizedUser(attrs.from)
-				if (msgId && jid && !tcTokenRetriedMsgIds.has(msgId)) {
-					tcTokenRetriedMsgIds.add(msgId)
-					setTimeout(() => tcTokenRetriedMsgIds.delete(msgId), 60_000)
-					try {
-						const msg = await getMessage(key)
-						if (msg) {
-							await delay(1500)
-							await relayMessage(jid, msg, { messageId: msgId, useUserDevicesCache: true })
-							logger.info({ msgId, from: jid }, 'error 463 retry succeeded')
-							return
-						}
-						logger.warn({ msgId, from: jid }, 'error 463: original message not found, cannot retry')
-					} catch (err) {
-						logger.warn({ msgId, from: jid, err }, 'error 463 retry failed')
-					}
-				} else if (msgId && tcTokenRetriedMsgIds.has(msgId)) {
-					logger.warn({ msgId, from: jid }, 'error 463: already retried, giving up')
-				}
+				// Não reenviar: cada retry sem token conta como um novo reach-out e piora a restrição.
+				logger.warn(
+					{
+						event: 'message_ack_error',
+						errorCode: SERVER_ERROR_CODES.MissingTcToken,
+						msgId: attrs.id,
+						from: attrs.from,
+						reachoutTimelocked: true
+					},
+					'erro 463: conta restrita ou contato sem tctoken'
+				)
 			} else {
 				logger.warn({ attrs }, 'received error in ack')
 			}
@@ -1536,11 +1603,21 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 	})
 
-	ev.on('connection.update', ({ isOnline }) => {
+	ev.on('connection.update', ({ isOnline, connection }) => {
 		if (typeof isOnline !== 'undefined') {
 			sendActiveReceipts = isOnline
 			logger.trace(`sendActiveReceipts set to "${sendActiveReceipts}"`)
 		}
+
+		if (connection === 'close') {
+			if (tcTokenPruneTimer) {
+				clearTimeout(tcTokenPruneTimer)
+				tcTokenPruneTimer = undefined
+			}
+			void flushTcTokenIndex().catch(() => {})
+		}
+
+		if (isOnline) scheduleTcTokenPrune()
 	})
 
 	return {

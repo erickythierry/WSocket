@@ -11,6 +11,7 @@ import {
 	MessageRelayOptions,
 	MiscMessageGenerationOptions,
 	SecretGroupMessageOptions,
+	SignalDataTypeMap,
 	SocketConfig,
 	WAMessageKey
 } from '../Types'
@@ -35,7 +36,18 @@ import {
 	encodeNewsletterMessage
 } from '../Utils'
 import { getUrlInfo } from '../Utils/link-preview'
-import { isTcTokenExpired, shouldSendNewTcToken, storeTcTokensFromIqResult } from '../Utils/tc-token-utils'
+import { BoundedTtlMap } from '../Utils/bounded-ttl-map'
+import { generateCsToken, readNctSalt } from '../Utils/cs-token-utils'
+import { makeMutex } from '../Utils/make-mutex'
+import {
+	buildMergedTcTokenIndexWrite,
+	isTcTokenExpired,
+	resolveTcTokenStorageJid,
+	shouldSendNewTcToken,
+	storeTcTokensFromIqResult,
+	TC_TOKEN_INDEX_KEY,
+	type LidResolver
+} from '../Utils/tc-token-utils'
 import {
 	areJidsSameUser,
 	BinaryNode,
@@ -81,6 +93,114 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY,
 		useClones: false
 	})
+
+	const inFlightTcTokenIssuance = new Set<string>()
+	const TC_TOKEN_MAX_CONCURRENT_ISSUANCE = 2
+	let activeTcTokenIssuance = 0
+
+	const TC_TOKEN_INDEX_FLUSH_MAX_PENDING = 100
+	const TC_TOKEN_INDEX_MAX_PENDING = 5_000
+	const TC_TOKEN_INDEX_FLUSH_INTERVAL_MS = 30_000
+	const pendingTcTokenIndexJids = new Set<string>()
+	const recentlyTrackedTcTokenJids = new BoundedTtlMap<string, true>(5_000, 24 * 60 * 60 * 1000)
+	let tcTokenIndexFlushTimer: ReturnType<typeof setTimeout> | undefined
+	let tcTokenIndexFlushInFlight: Promise<void> | undefined
+	let lastTcTokenIndexFullWarnMs = 0
+	const tcTokenIndexMutex = makeMutex()
+
+	function armTcTokenIndexFlush() {
+		if (tcTokenIndexFlushTimer || tcTokenIndexFlushInFlight) return
+		tcTokenIndexFlushTimer = setTimeout(() => {
+			tcTokenIndexFlushTimer = undefined
+			void flushTcTokenIndex().catch(err => logger.warn({ err: err?.message }, 'falha ao salvar índice de tctokens'))
+		}, TC_TOKEN_INDEX_FLUSH_INTERVAL_MS)
+	}
+
+	function trackTcTokenJid(jid: string) {
+		if (!jid || jid === TC_TOKEN_INDEX_KEY || recentlyTrackedTcTokenJids.has(jid)) return
+		if (pendingTcTokenIndexJids.size >= TC_TOKEN_INDEX_MAX_PENDING) {
+			if (Date.now() - lastTcTokenIndexFullWarnMs >= 60_000) {
+				lastTcTokenIndexFullWarnMs = Date.now()
+				logger.warn({ pending: pendingTcTokenIndexJids.size }, 'fila do índice de tctokens cheia')
+			}
+			return
+		}
+
+		recentlyTrackedTcTokenJids.set(jid, true)
+		pendingTcTokenIndexJids.add(jid)
+		if (pendingTcTokenIndexJids.size >= TC_TOKEN_INDEX_FLUSH_MAX_PENDING) {
+			void flushTcTokenIndex().catch(err => logger.warn({ err: err?.message }, 'falha ao salvar lote do índice de tctokens'))
+		} else {
+			armTcTokenIndexFlush()
+		}
+	}
+
+	async function writePendingTcTokenIndex() {
+		while (pendingTcTokenIndexJids.size) {
+			const batch = [...pendingTcTokenIndexJids]
+			pendingTcTokenIndexJids.clear()
+			try {
+				const write = await buildMergedTcTokenIndexWrite(authState.keys, batch)
+				await authState.keys.set({ tctoken: write })
+			} catch (err) {
+				for (const jid of batch) pendingTcTokenIndexJids.add(jid)
+				throw err
+			}
+		}
+	}
+
+	function flushTcTokenIndex(): Promise<void> {
+		if (tcTokenIndexFlushInFlight) return tcTokenIndexFlushInFlight
+		if (tcTokenIndexFlushTimer) {
+			clearTimeout(tcTokenIndexFlushTimer)
+			tcTokenIndexFlushTimer = undefined
+		}
+
+		tcTokenIndexFlushInFlight = tcTokenIndexMutex.mutex(writePendingTcTokenIndex).finally(() => {
+			tcTokenIndexFlushInFlight = undefined
+			if (pendingTcTokenIndexJids.size) armTcTokenIndexFlush()
+		})
+		return tcTokenIndexFlushInFlight
+	}
+
+	function withFlushedTcTokenIndex<T>(task: () => Promise<T>): Promise<T> {
+		return tcTokenIndexMutex.mutex(async () => {
+			await writePendingTcTokenIndex()
+			return task()
+		})
+	}
+
+	const pnToLid = new BoundedTtlMap<string, string>(5_000, 10 * 60 * 1000)
+	const getLidForPn: LidResolver = pnJid =>
+		pnToLid.get(jidNormalizedUser(pnJid)) || caches.lidCache.get(jidNormalizedUser(pnJid))
+
+	function cacheLidMapping(pnJid?: string, lidJid?: string) {
+		if (!pnJid || !lidJid) return
+		const pn = jidNormalizedUser(pnJid)
+		const lid = jidNormalizedUser(lidJid)
+		if (!isJidUser(pn) || !isLidUser(lid)) return
+
+		pnToLid.set(pn, lid)
+		caches.lidCache.set(pn, lid)
+	}
+
+	const tcTokenStorageJid = (jid: string) => resolveTcTokenStorageJid(jid, getLidForPn)
+
+	async function buildCsTokenForJid(jid: string): Promise<{
+		token?: Buffer
+		reason?: 'missing_lid' | 'missing_nct_salt' | 'keystore_error'
+	}> {
+		try {
+			const recipientLid = tcTokenStorageJid(jid)
+			if (!isLidUser(recipientLid)) return { reason: 'missing_lid' }
+			const salt = await readNctSalt(authState.keys)
+			if (!salt?.length) return { reason: 'missing_nct_salt' }
+			return { token: generateCsToken(salt, recipientLid) }
+		} catch (err) {
+			logger.debug({ jid, err: (err as Error)?.message }, 'falha ao gerar cstoken')
+			return { reason: 'keystore_error' }
+		}
+	}
 	const {
 		ev,
 		authState,
@@ -428,6 +548,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const verify = caches.lidCache.get(userQuery)
 				if (verify) {
 					lids = verify
+					cacheLidMapping(userQuery, verify)
 				} else {
 					const usyncQuery = new USyncQuery().withContactProtocol().withLIDProtocol()
 					usyncQuery.withUser(new USyncUser().withPhone(userQuery.split('@')[0]))
@@ -435,7 +556,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					if (results?.list) {
 						const maybeLid = results.list[0]?.lid
 						if (typeof maybeLid === 'string') {
-							caches.lidCache.set(userQuery, maybeLid)
+							cacheLidMapping(userQuery, maybeLid)
 							lids = maybeLid
 						}
 					}
@@ -825,21 +946,44 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 
 			const isPeerMessage = additionalAttributes?.['category'] === 'peer'
-			const is1on1Send = !isGroup && !isStatus && !isNewsletter && !isretry && !isPeerMessage
-			const tcTokenJid = is1on1Send ? jidNormalizedUser(destinationJid) : undefined
-			const tcTokenEntry = tcTokenJid
-				? (await authState.keys.get('contacts-tc-token', [tcTokenJid]))[tcTokenJid]
-				: undefined
+			const is1on1Send =
+				!participant &&
+				!isGroup &&
+				!isStatus &&
+				!isNewsletter &&
+				!isretry &&
+				!isPeerMessage &&
+				(isJidUser(destinationJid) || isLidUser(destinationJid))
+			const tcTokenJid = is1on1Send ? tcTokenStorageJid(destinationJid) : undefined
+			let tcTokenEntry: SignalDataTypeMap['tctoken'] | undefined
+			let tcTokenReadFailed = false
+			if (tcTokenJid) {
+				try {
+					tcTokenEntry = (await authState.keys.get('tctoken', [tcTokenJid]))[tcTokenJid]
+				} catch (err) {
+					tcTokenReadFailed = true
+					logger.debug({ jid: destinationJid, err: (err as Error)?.message }, 'falha ao ler tctoken')
+				}
+			}
+
 			let tcTokenBuffer: Buffer | undefined = tcTokenEntry?.token
+			let tcTokenState: 'missing' | 'awaiting_recipient' | 'ready' | 'expired' = tcTokenEntry
+				? tcTokenBuffer?.length
+					? 'ready'
+					: tcTokenEntry.senderTimestamp !== undefined
+						? 'awaiting_recipient'
+						: 'missing'
+				: 'missing'
 			if (tcTokenBuffer?.length && isTcTokenExpired(tcTokenEntry?.timestamp)) {
 				logger.debug({ jid: destinationJid, timestamp: tcTokenEntry?.timestamp }, 'tctoken expired, clearing')
 				tcTokenBuffer = undefined
+				tcTokenState = 'expired'
 				const cleared =
 					tcTokenEntry?.senderTimestamp !== undefined
 						? { token: Buffer.alloc(0), senderTimestamp: tcTokenEntry.senderTimestamp }
 						: null
 				try {
-					await authState.keys.set({ 'contacts-tc-token': { [tcTokenJid!]: cleared } })
+					await authState.keys.set({ tctoken: { [tcTokenJid!]: cleared } })
 				} catch {}
 			}
 			if (tcTokenBuffer?.length) {
@@ -848,6 +992,48 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					attrs: {},
 					content: tcTokenBuffer
 				})
+				logger.info(
+					{
+						event: 'privacy_token_outgoing_message',
+						msgId: stanza.attrs.id,
+						recipient: jidNormalizedUser(destinationJid),
+						storageJid: tcTokenJid,
+						privacyTokenType: 'tctoken',
+						tcTokenState
+					},
+					'mensagem 1:1 protegida por tctoken'
+				)
+			} else if (is1on1Send && tcTokenJid) {
+				const csTokenResult = await buildCsTokenForJid(destinationJid)
+				if (csTokenResult.token?.length) {
+					;(stanza.content as BinaryNode[]).push({ tag: 'cstoken', attrs: {}, content: csTokenResult.token })
+					logger.info(
+						{
+							event: 'privacy_token_outgoing_message',
+							msgId: stanza.attrs.id,
+							recipient: jidNormalizedUser(destinationJid),
+							storageJid: tcTokenJid,
+							privacyTokenType: 'cstoken',
+							tcTokenReadFailed,
+							tcTokenState
+						},
+						'mensagem 1:1 protegida por cstoken'
+					)
+				} else {
+					logger.warn(
+						{
+							event: 'privacy_token_outgoing_message',
+							msgId: stanza.attrs.id,
+							recipient: jidNormalizedUser(destinationJid),
+							storageJid: tcTokenJid,
+							privacyTokenType: 'none',
+							reason: csTokenResult.reason,
+							tcTokenReadFailed,
+							tcTokenState
+						},
+						'mensagem 1:1 sem privacy token'
+					)
+				}
 			}
 
 			if (additionalNodes && additionalNodes.length > 0) {
@@ -894,29 +1080,13 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				selectiveMessageCache.set(selectiveCacheKey, message)
 			}
 
-			if (is1on1Send && tcTokenJid && shouldSendNewTcToken(tcTokenEntry?.senderTimestamp)) {
-				const issueTimestamp = unixTimestampSeconds()
-				getPrivacyTokens([tcTokenJid], issueTimestamp)
-					.then(async result => {
-						await storeTcTokensFromIqResult({
-							result,
-							fallbackJid: tcTokenJid,
-							keys: authState.keys
-						})
-						const currentData = await authState.keys.get('contacts-tc-token', [tcTokenJid])
-						const currentEntry = currentData[tcTokenJid]
-						await authState.keys.set({
-							'contacts-tc-token': {
-								[tcTokenJid]: {
-									...(currentEntry ?? { token: Buffer.alloc(0) }),
-									senderTimestamp: issueTimestamp
-								}
-							}
-						})
-					})
-					.catch(err => {
-						logger.debug({ jid: destinationJid, err: err?.message }, 'fire-and-forget tctoken issuance failed')
-					})
+			if (is1on1Send && tcTokenJid) {
+				void maybeIssueTcToken(destinationJid, message, {
+					participant,
+					additionalAttributes,
+					storageJid: tcTokenJid,
+					msgId: stanza.attrs.id
+				})
 			}
 		})
 
@@ -1078,6 +1248,74 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		}
 	}
 
+	async function maybeIssueTcToken(
+		jid: string,
+		message: proto.IMessage,
+		options: {
+			participant?: MessageRelayOptions['participant']
+			additionalAttributes?: BinaryNodeAttributes
+			storageJid: string
+			msgId: string
+		}
+	) {
+		try {
+			if (options.participant || options.additionalAttributes?.['category'] === 'peer') return
+			if (normalizeMessageContent(message)?.protocolMessage) return
+
+			const current = await authState.keys.get('tctoken', [options.storageJid])
+			if (!shouldSendNewTcToken(current[options.storageJid]?.senderTimestamp)) return
+			if (inFlightTcTokenIssuance.has(options.storageJid)) return
+			if (activeTcTokenIssuance >= TC_TOKEN_MAX_CONCURRENT_ISSUANCE) return
+
+			inFlightTcTokenIssuance.add(options.storageJid)
+			activeTcTokenIssuance += 1
+			const issueTimestamp = unixTimestampSeconds()
+			try {
+				const result = await getPrivacyTokens([jid], issueTimestamp)
+				const storedJids = await storeTcTokensFromIqResult({
+					result,
+					fallbackJid: options.storageJid,
+					keys: authState.keys,
+					resolveLid: getLidForPn,
+					onNewJidStored: trackTcTokenJid
+				})
+				const afterEntry = (await authState.keys.get('tctoken', [options.storageJid]))[options.storageJid]
+				const recipientTokenStored = storedJids.includes(options.storageJid)
+				const recipientTokenPresent = !!afterEntry?.token?.length
+				await authState.keys.set({
+					tctoken: {
+						[options.storageJid]: {
+							...afterEntry,
+							token: afterEntry?.token ?? Buffer.alloc(0),
+							senderTimestamp: issueTimestamp
+						}
+					}
+				})
+				trackTcTokenJid(options.storageJid)
+				logger.info(
+					{
+						event: 'tc_token_issued',
+						msgId: options.msgId,
+						recipient: jidNormalizedUser(jid),
+						storageJid: options.storageJid,
+						recipientTokenStored,
+						recipientTokenPresent
+					},
+					recipientTokenStored
+						? 'tc token emitido e token do destinatário persistido'
+						: recipientTokenPresent
+							? 'tc token emitido; token existente preservado'
+							: 'tc token emitido; aguardando token do destinatário'
+				)
+			} finally {
+				inFlightTcTokenIssuance.delete(options.storageJid)
+				activeTcTokenIssuance -= 1
+			}
+		} catch (err) {
+			logger.debug({ jid, err: (err as Error)?.message }, 'falha ao emitir tctoken')
+		}
+	}
+
 	const getPrivacyTokens = async (jids: string[], timestamp?: number) => {
 		const t = (timestamp ?? unixTimestampSeconds()).toString()
 		const result = await query({
@@ -1113,6 +1351,12 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	return {
 		...sock,
 		getPrivacyTokens,
+		getLidForPn,
+		cacheLidMapping,
+		tcTokenStorageJid,
+		trackTcTokenJid,
+		flushTcTokenIndex,
+		withFlushedTcTokenIndex,
 		assertSessions,
 		relayMessage,
 		sendReceipt,

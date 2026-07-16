@@ -69,10 +69,14 @@ export type SignalDataTypeMap = {
     };
     'app-state-sync-key': proto.Message.IAppStateSyncKeyData;
     'app-state-sync-version': LTHashState;
-    'contacts-tc-token': {
+    tctoken: {
         token: Buffer;
         timestamp?: string;
         senderTimestamp?: number;
+    };
+    /** Salt do NCT recebido via app state/history sync e usado para derivar o cstoken. */
+    'nct-salt': {
+        salt: Buffer;
     };
 };
 export type SignalDataSet = {

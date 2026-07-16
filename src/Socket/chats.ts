@@ -39,12 +39,16 @@ import {
 	processSyncAction
 } from '../Utils'
 import { buildTcTokenFromJid } from '../Utils/tc-token-utils'
+import { handleNctSaltMutation, NCT_SALT_SYNC_INDEX } from '../Utils/cs-token-utils'
+import caches from '../Utils/cache-utils'
 import { makeMutex } from '../Utils/make-mutex'
 import processMessage from '../Utils/process-message'
 import {
 	BinaryNode,
 	getBinaryNodeChild,
 	getBinaryNodeChildren,
+	isJidUser,
+	isLidUser,
 	jidDecode,
 	jidNormalizedUser,
 	reduceBinaryNodeToDictionary,
@@ -448,7 +452,12 @@ export const makeChatsSocket = (config: SocketConfig) => {
 
 	const newAppStateChunkHandler = (isInitialSync: boolean) => {
 		return {
-			onMutation(mutation: ChatMutation) {
+			async onMutation(mutation: ChatMutation) {
+				if (mutation.index?.[0] === NCT_SALT_SYNC_INDEX) {
+					await handleNctSaltMutation({ mutation, keys: authState.keys, logger })
+					return
+				}
+
 				processSyncAction(
 					mutation,
 					ev,
@@ -460,16 +469,28 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		}
 	}
 
+	/** Persiste o NCT salt antes de confirmar a nova versão da collection. */
+	const persistNctSaltMutations = async (mutationMap: ChatMutationMap) => {
+		for (const key of Object.keys(mutationMap)) {
+			const mutation = mutationMap[key]
+			if (mutation.index?.[0] !== NCT_SALT_SYNC_INDEX) continue
+
+			await handleNctSaltMutation({ mutation, keys: authState.keys, logger })
+			delete mutationMap[key]
+		}
+	}
+
 	const resyncAppState = ev.createBufferedFunction(
 		async (collections: readonly WAPatchName[], isInitialSync: boolean) => {
 			const filtered = collections.filter(c => c !== 'critical_unblock_low')
-			if (filtered.length === 0) return
+			if (filtered.length === 0) return { failedCollections: [] as WAPatchName[] }
 			collections = filtered
 
 			// we use this to determine which events to fire
 			// otherwise when we resync from scratch -- all notifications will fire
 			const initialVersionMap: { [T in WAPatchName]?: number } = {}
 			const globalMutationMap: ChatMutationMap = {}
+			const failedCollections = new Set<WAPatchName>()
 
 			// cache app-state-sync-keys for the duration of this resync only,
 			// to avoid repeated store lookups for the same keyId during large snapshots/patches
@@ -554,6 +575,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 									appStateMacVerification.snapshot
 								)
 								states[name] = newState
+								await persistNctSaltMutations(mutationMap)
 								Object.assign(globalMutationMap, mutationMap)
 
 								logger.info(`restored state of ${name} from snapshot to v${newState.version} with mutations`)
@@ -574,6 +596,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 									appStateMacVerification.patch
 								)
 
+								await persistNctSaltMutations(mutationMap)
 								await authState.keys.set({ 'app-state-sync-version': { [name]: newState } })
 
 								logger.info(`synced ${name} to v${newState.version}`)
@@ -606,6 +629,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 							if (isIrrecoverableError) {
 								// stop retrying
 								collectionsToHandle.delete(name)
+								failedCollections.add(name)
 							}
 						}
 					}
@@ -614,8 +638,10 @@ export const makeChatsSocket = (config: SocketConfig) => {
 
 			const { onMutation } = newAppStateChunkHandler(isInitialSync)
 			for (const key in globalMutationMap) {
-				onMutation(globalMutationMap[key])
+				await onMutation(globalMutationMap[key])
 			}
+
+			return { failedCollections: [...failedCollections] }
 		}
 	)
 
@@ -626,8 +652,20 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	 */
 	const profilePictureUrl = async (jid: string, type: 'preview' | 'image' = 'preview', timeoutMs?: number) => {
 		jid = jidNormalizedUser(jid)
-		const content: BinaryNode[] = [{ tag: 'picture', attrs: { type, query: 'url' } }]
-		await buildTcTokenFromJid({ keys: authState.keys, jid, baseContent: content })
+		const me = authState.creds.me
+		const isSelf = jid === jidNormalizedUser(me?.id) || jid === jidNormalizedUser(me?.lid)
+		const tcTokenContent = !isSelf && (isJidUser(jid) || isLidUser(jid))
+			? await buildTcTokenFromJid({
+				keys: authState.keys,
+				jid,
+				resolveLid: pn => caches.lidCache.get(jidNormalizedUser(pn))
+			})
+			: undefined
+		const content: BinaryNode[] = [{
+			tag: 'picture',
+			attrs: { type, query: 'url' },
+			content: tcTokenContent
+		}]
 		const result = await query(
 			{
 				tag: 'iq',
@@ -691,7 +729,11 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		if (tcToken) {
 			content = [{ tag: 'tctoken', attrs: {}, content: tcToken }]
 		} else {
-			content = await buildTcTokenFromJid({ keys: authState.keys, jid: toJid })
+			content = await buildTcTokenFromJid({
+				keys: authState.keys,
+				jid: toJid,
+				resolveLid: pn => caches.lidCache.get(jidNormalizedUser(pn))
+			})
 		}
 		return sendNode({
 			tag: 'presence',
@@ -777,7 +819,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 				logger
 			)
 			for (const key in mutationMap) {
-				onMutation(mutationMap[key])
+				await onMutation(mutationMap[key])
 			}
 		}
 	}
@@ -1002,7 +1044,14 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		async function doAppStateSync() {
 			if (!authState.creds.accountSyncCounter) {
 				logger.info('doing initial app state sync')
-				await resyncAppState(ALL_WA_PATCH_NAMES, true)
+				const result = await resyncAppState(ALL_WA_PATCH_NAMES, true)
+				if (result?.failedCollections.length) {
+					logger.warn(
+						{ collections: result.failedCollections },
+						'app state sync inicial incompleto; contador não será avançado'
+					)
+					return
+				}
 
 				const accountSyncCounter = (authState.creds.accountSyncCounter || 0) + 1
 				ev.emit('creds.update', { accountSyncCounter })

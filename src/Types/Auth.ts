@@ -72,7 +72,9 @@ export type SignalDataTypeMap = {
 	'sender-key-memory': { [jid: string]: boolean }
 	'app-state-sync-key': proto.Message.IAppStateSyncKeyData
 	'app-state-sync-version': LTHashState
-	'contacts-tc-token': { token: Buffer; timestamp?: string; senderTimestamp?: number }
+	tctoken: { token: Buffer; timestamp?: string; senderTimestamp?: number }
+	/** Salt do NCT recebido via app state/history sync e usado para derivar o cstoken. */
+	'nct-salt': { salt: Buffer }
 }
 
 export type SignalDataSet = { [T in keyof SignalDataTypeMap]?: { [id: string]: SignalDataTypeMap[T] | null } }

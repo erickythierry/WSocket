@@ -1497,6 +1497,7 @@ message HistorySync {
     optional string companionMetaNonce = 16;
     optional bytes shareableChatIdentifierEncryptionKey = 17;
     repeated Account accounts = 18;
+    optional bytes nctSalt = 19;
     enum BotAIWaitListState {
         IN_WAITLIST = 0;
         AI_AVAILABLE = 1;
@@ -3784,6 +3785,7 @@ message SyncActionValue {
     optional LidContactAction lidContactAction = 61;
     optional CtwaPerCustomerDataSharingAction ctwaPerCustomerDataSharingAction = 62;
     optional PaymentTosAction paymentTosAction = 63;
+    optional NctSaltSyncAction nctSaltSyncAction = 80;
     message AgentAction {
         optional string name = 1;
         optional int32 deviceID = 2;
@@ -3793,7 +3795,7 @@ message SyncActionValue {
     message AndroidUnsupportedActions {
         optional bool allowed = 1;
     }
-    
+
     message ArchiveChatAction {
         optional bool archived = 1;
         optional SyncActionValue.SyncActionMessageRange messageRange = 2;
@@ -4123,6 +4125,10 @@ message SyncActionValue {
         optional string identifier = 1;
     }
     
+}
+
+message NctSaltSyncAction {
+    optional bytes salt = 1;
 }
 
 message SyncdIndex {

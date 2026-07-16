@@ -15812,6 +15812,9 @@ export namespace proto {
 
         /** HistorySync accounts */
         accounts?: (proto.IAccount[]|null);
+
+        /** HistorySync nctSalt */
+        nctSalt?: (Uint8Array|null);
     }
 
     /** Represents a HistorySync. */
@@ -15873,6 +15876,9 @@ export namespace proto {
 
         /** HistorySync accounts. */
         public accounts: proto.IAccount[];
+
+        /** HistorySync nctSalt. */
+        public nctSalt?: (Uint8Array|null);
 
         /**
          * Creates a new HistorySync instance using the specified properties.
@@ -43412,6 +43418,9 @@ export namespace proto {
 
         /** SyncActionValue paymentTosAction */
         paymentTosAction?: (proto.SyncActionValue.IPaymentTosAction|null);
+
+        /** SyncActionValue nctSaltSyncAction */
+        nctSaltSyncAction?: (proto.INctSaltSyncAction|null);
     }
 
     /** Represents a SyncActionValue. */
@@ -43593,6 +43602,9 @@ export namespace proto {
 
         /** SyncActionValue paymentTosAction. */
         public paymentTosAction?: (proto.SyncActionValue.IPaymentTosAction|null);
+
+        /** SyncActionValue nctSaltSyncAction. */
+        public nctSaltSyncAction?: (proto.INctSaltSyncAction|null);
 
         /**
          * Creates a new SyncActionValue instance using the specified properties.
@@ -49852,6 +49864,33 @@ export namespace proto {
              */
             public static getTypeUrl(typeUrlPrefix?: string): string;
         }
+    }
+
+    /** Properties of a NctSaltSyncAction. */
+    interface INctSaltSyncAction {
+
+        /** NctSaltSyncAction salt */
+        salt?: (Uint8Array|null);
+    }
+
+    /** Represents a NctSaltSyncAction. */
+    class NctSaltSyncAction implements INctSaltSyncAction {
+
+        constructor(properties?: proto.INctSaltSyncAction);
+
+        /** NctSaltSyncAction salt. */
+        public salt?: (Uint8Array|null);
+
+        public static create(properties?: proto.INctSaltSyncAction): proto.NctSaltSyncAction;
+        public static encode(message: proto.INctSaltSyncAction, writer?: $protobuf.Writer): $protobuf.Writer;
+        public static encodeDelimited(message: proto.INctSaltSyncAction, writer?: $protobuf.Writer): $protobuf.Writer;
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): proto.NctSaltSyncAction;
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): proto.NctSaltSyncAction;
+        public static verify(message: { [k: string]: any }): (string|null);
+        public static fromObject(object: { [k: string]: any }): proto.NctSaltSyncAction;
+        public static toObject(message: proto.NctSaltSyncAction, options?: $protobuf.IConversionOptions): { [k: string]: any };
+        public toJSON(): { [k: string]: any };
+        public static getTypeUrl(typeUrlPrefix?: string): string;
     }
 
     /** Properties of a SyncdIndex. */

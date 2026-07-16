@@ -65,6 +65,8 @@ export function makeCacheableSignalKeyStore(
 			return data
 		},
 		async set(data) {
+			await store.set(data)
+
 			let keys = 0
 			for (const type in data) {
 				for (const id in data[type]) {
@@ -74,8 +76,6 @@ export function makeCacheableSignalKeyStore(
 			}
 
 			logger?.trace({ keys }, 'updated cache')
-
-			await store.set(data)
 		},
 		async clear() {
 			cache.flushAll()
@@ -147,6 +147,7 @@ export const addTransactionCapability = (
 		isInTransaction,
 		async transaction(work) {
 			let result: Awaited<ReturnType<typeof work>>
+			let commitError: unknown
 			transactionsInProgress += 1
 			if (transactionsInProgress === 1) {
 				logger.trace('entering transaction')
@@ -166,13 +167,16 @@ export const addTransactionCapability = (
 							//eslint-disable-next-line max-depth
 							try {
 								await state.set(mutations)
+								commitError = undefined
 								logger.trace({ dbQueriesInTransaction }, 'committed transaction')
 								break
 							} catch (error) {
+								commitError = error
 								logger.warn(`failed to commit ${Object.keys(mutations).length} mutations, tries left=${tries}`)
-								await delay(delayBetweenTriesMs)
+								if (tries) await delay(delayBetweenTriesMs)
 							}
 						}
+						if (commitError && !tries) throw commitError
 					} else {
 						logger.trace('no mutations in transaction')
 					}

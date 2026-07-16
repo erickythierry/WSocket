@@ -95,7 +95,10 @@ const makeLtHashGenerator = ({ indexValueMap, hash }: Pick<LTHashState, 'hash' |
 			const prevOp = indexValueMap[indexMacBase64]
 			if (operation === proto.SyncdMutation.SyncdOperation.REMOVE) {
 				if (!prevOp) {
-					throw new Boom('tried remove, but no previous op', { data: { indexMac, valueMac } })
+					// O servidor pode enviar tombstones de índices que este device nunca recebeu.
+					// Tratar como no-op evita descartar as demais mutations válidas do patch,
+					// inclusive uma eventual mutation nct_salt_sync.
+					return
 				}
 
 				// remove from index value mac, since this mutation is erased
@@ -246,7 +249,7 @@ export const decodeSyncdMutations = async (
 		}
 
 		const indexStr = Buffer.from(syncAction.index!).toString()
-		onMutation({ syncAction, index: JSON.parse(indexStr) })
+		onMutation({ syncAction, index: JSON.parse(indexStr), operation: operation! })
 
 		ltGenerator.mix({
 			indexMac: record.index!.blob!,

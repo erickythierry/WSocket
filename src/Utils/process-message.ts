@@ -16,8 +16,10 @@ import { getContentType, normalizeMessageContent } from '../Utils/messages'
 import { areJidsSameUser, isJidBroadcast, isJidStatusBroadcast, jidNormalizedUser } from '../WABinary'
 import { aesDecryptGCM, hmacSign } from './crypto'
 import { toNumber } from './generics'
-import { downloadAndProcessHistorySyncNotification } from './history'
+import { downloadHistory, processHistoryMessage } from './history'
 import { ILogger } from './logger'
+import { storeNctSaltFromHistorySync } from './cs-token-utils'
+import { storeTcTokensFromHistorySync } from './tc-token-utils'
 
 type ProcessMessageContext = {
 	shouldProcessHistoryMsg: boolean
@@ -174,14 +176,21 @@ const processMessage = async (
 	const protocolMsg = content?.protocolMessage
 	if (protocolMsg) {
 		switch (protocolMsg.type) {
-			case proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION:
+		case proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION:
 				const histNotification = protocolMsg.historySyncNotification!
 				const process = shouldProcessHistoryMsg
 				const isLatest = !creds.processedHistoryMessages?.length
+				const inlinePayloadLength = histNotification.initialHistBootstrapInlinePayload?.length || 0
 
-				logger?.info(
+				logger?.debug(
 					{
-						histNotification,
+						syncType: histNotification.syncType,
+						chunkOrder: histNotification.chunkOrder,
+						progress: histNotification.progress,
+						fileLength: histNotification.fileLength?.toString(),
+						hasInlinePayload: inlinePayloadLength > 0,
+						inlinePayloadLength,
+						inspectionSource: inlinePayloadLength > 0 ? 'inline' : 'external',
 						process,
 						id: message.key.id,
 						isLatest
@@ -199,8 +208,36 @@ const processMessage = async (
 						})
 					}
 
-					const data = await downloadAndProcessHistorySyncNotification(histNotification, options)
+				}
 
+				let historySync: proto.HistorySync
+				try {
+					historySync = await downloadHistory(histNotification, options)
+				} catch (err) {
+					if (process) throw err
+					logger?.warn(
+						{
+							event: 'privacy_history_sync_inspection_failed',
+							msgId: message.key.id,
+							syncType: histNotification.syncType,
+							source: inlinePayloadLength > 0 ? 'inline' : 'external',
+							err: (err as Error)?.message
+						},
+						'falha ao inspecionar material de privacidade no history sync'
+					)
+					break
+				}
+
+				try {
+					await storeNctSaltFromHistorySync(historySync, keyStore, logger)
+				} catch (err) {
+					logger?.warn({ err }, 'falha ao persistir nct salt do history sync')
+				}
+
+				await storeTcTokensFromHistorySync((historySync.conversations || []) as Chat[], keyStore, logger)
+
+				if (process) {
+					const data = processHistoryMessage(historySync)
 					ev.emit('messaging-history.set', {
 						...data,
 						isLatest: histNotification.syncType !== proto.HistorySync.HistorySyncType.ON_DEMAND ? isLatest : undefined,

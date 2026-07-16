@@ -27,6 +27,8 @@ export type BotListInfo = {
 export type ChatMutation = {
     syncAction: proto.ISyncActionData;
     index: string[];
+    /** SET grava o valor; REMOVE apaga (necessário para o lifecycle do NCT salt). */
+    operation?: proto.SyncdMutation.SyncdOperation;
 };
 export type WAPatchCreate = {
     syncAction: proto.ISyncActionValue;

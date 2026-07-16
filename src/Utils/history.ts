@@ -11,13 +11,18 @@ import { downloadContentFromMessage } from './messages-media'
 const inflatePromise = promisify(inflate)
 
 export const downloadHistory = async (msg: proto.Message.IHistorySyncNotification, options: AxiosRequestConfig<{}>) => {
-	const stream = await downloadContentFromMessage(msg, 'md-msg-hist', { options })
-	const bufferArray: Buffer[] = []
-	for await (const chunk of stream) {
-		bufferArray.push(chunk)
-	}
+	let buffer: Buffer
+	if (msg.initialHistBootstrapInlinePayload?.length) {
+		buffer = Buffer.from(msg.initialHistBootstrapInlinePayload)
+	} else {
+		const stream = await downloadContentFromMessage(msg, 'md-msg-hist', { options })
+		const bufferArray: Buffer[] = []
+		for await (const chunk of stream) {
+			bufferArray.push(chunk)
+		}
 
-	let buffer: Buffer = Buffer.concat(bufferArray)
+		buffer = Buffer.concat(bufferArray)
+	}
 
 	// decompress buffer
 	buffer = await inflatePromise(buffer)
