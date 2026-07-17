@@ -798,11 +798,18 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				})
 
 				const senderKeyJids: string[] = []
+				// sender key rotacionada (selective relay) precisa ser redistribuída a todos
+				const skdmToAll = !!excludeJids?.length || !!includeJids?.length
 				for (const { user, device, jid } of devices) {
 					const server = jidDecode(jid)?.server || 'lid'
 					const senderId = jidEncode(user, server, device)
-					senderKeyJids.push(senderId)
-					senderKeyMap[senderId] = true
+					// só manda SKDM pra quem ainda não recebeu a sender key;
+					// mandar pra todos em todo envio provoca retry receipt de devices
+					// quebrados a cada mensagem
+					if (!senderKeyMap[senderId] || !!participant || skdmToAll) {
+						senderKeyJids.push(senderId)
+						senderKeyMap[senderId] = true
+					}
 				}
 
 				// if there are some participants with whom the session has not been established
@@ -836,7 +843,11 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					content: ciphertext
 				})
 
-				await authState.keys.set({ 'sender-key-memory': { [jid]: senderKeyMap } })
+				// só persiste no envio normal; no retry (participant) o map começa vazio
+				// e persistir aqui clobberaria o map completo do grupo
+				if (!participant) {
+					await authState.keys.set({ 'sender-key-memory': { [jid]: senderKeyMap } })
+				}
 			} else {
 				const { user: meUser, device: meDevice } = jidDecode(meId)!
 
