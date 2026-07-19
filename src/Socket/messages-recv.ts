@@ -107,22 +107,29 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	/** this mutex ensures that each retryRequest will wait for the previous one to finish */
 	const retryMutex = makeMutex()
 
-	// ponytail: throttle de retry por participante — Map simples; se precisar de
-	// limpeza/TTL real, trocar por BoundedTtlMap
 	const RETRY_PER_PARTICIPANT_MAX = 3
 	const RETRY_PER_PARTICIPANT_WINDOW_MS = 10 * 60 * 1000
-	const participantRetryCache = new Map<string, { count: number; ts: number }>()
+	const participantRetryCache = new Map<string, { count: number; expiresAt: number; warned: boolean }>()
 	const shouldSkipParticipantRetry = (participant: string) => {
 		const now = Date.now()
 		const entry = participantRetryCache.get(participant)
-		if (!entry || now - entry.ts > RETRY_PER_PARTICIPANT_WINDOW_MS) {
-			participantRetryCache.set(participant, { count: 1, ts: now })
-			return false
+		if (!entry || now >= entry.expiresAt) {
+			const expiresAt = now + RETRY_PER_PARTICIPANT_WINDOW_MS
+			participantRetryCache.set(participant, { count: 1, expiresAt, warned: false })
+			const cleanupTimer = setTimeout(() => {
+				if (participantRetryCache.get(participant)?.expiresAt === expiresAt) {
+					participantRetryCache.delete(participant)
+				}
+			}, RETRY_PER_PARTICIPANT_WINDOW_MS)
+			cleanupTimer.unref()
+			return { skip: false, warn: false }
 		}
 
 		entry.count++
-		entry.ts = now
-		return entry.count > RETRY_PER_PARTICIPANT_MAX
+		const skip = entry.count > RETRY_PER_PARTICIPANT_MAX
+		const warn = skip && !entry.warned
+		if (warn) entry.warned = true
+		return { skip, warn }
 	}
 
 	const TC_TOKEN_PRUNE_BATCH = 20
@@ -739,8 +746,11 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		const participant = key.participant || remoteJid
 		// device zumbi pede retry em TODA mensagem (2 IQs + processingMutex bloqueado
 		// por retry) e nunca converge; após 3 retries em 10min, ignora os próximos
-		if (shouldSkipParticipantRetry(participant)) {
-			logger.warn({ participant, ids }, 'retry ignorado: participante excedeu limite de retries (device zumbi?)')
+		const participantRetry = shouldSkipParticipantRetry(participant)
+		if (participantRetry.skip) {
+			if (participantRetry.warn) {
+				logger.warn({ participant, ids }, 'retry ignorado: participante excedeu limite de retries (device zumbi?)')
+			}
 			return
 		}
 
