@@ -654,11 +654,20 @@ export const generateWAMessageContent = async (
 			listType: proto.Message.ListMessage.ListType.SINGLE_SELECT
 		};
 
-		m = { listMessage };
+		// Alguns clientes, principalmente Web e iOS, não renderizam ListMessage
+		// legado quando ele vai diretamente na raiz. O envelope
+		// documentWithCaptionMessage é somente um FutureProofMessage transportando
+		// a lista; nenhum documento é exibido para o destinatário.
+		m = {
+			documentWithCaptionMessage: {
+				message: { listMessage }
+			}
+		};
 	}
 
-	// ListMessage legado deve ir diretamente na raiz. O wrapper view-once faz
-	// alguns clientes ignorarem a lista e pode ser rejeitado pelo servidor.
+	// ListMessage legado usa documentWithCaptionMessage acima. Não adicione
+	// view-once: esse wrapper faz alguns clientes ignorarem a lista e pode ser
+	// rejeitado pelo servidor.
 	if ('viewOnce' in message && !!message.viewOnce && !('sections' in message && !!message.sections)) {
 		m = { viewOnceMessage: { message: m } };
 	}
