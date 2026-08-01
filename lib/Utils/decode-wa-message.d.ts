@@ -4,6 +4,11 @@ import { BinaryNode } from '../WABinary';
 import { ILogger } from './logger';
 export declare const NO_MESSAGE_FOUND_ERROR_TEXT = "Message absent from node";
 export declare const MISSING_KEYS_ERROR_TEXT = "Key used already or never filled";
+/**
+ * Motivo enviado no atributo `error` do retry receipt.
+ * `1` = sender key/sessão ausente (pede redistribuição), `3` = pre-key inválida (pede novo bundle).
+ */
+export declare const retryReasonFor: (decryptError?: string) => "1" | "3" | undefined;
 export declare const NACK_REASONS: {
     ParsingError: number;
     UnrecognizedStanza: number;

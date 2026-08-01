@@ -38,6 +38,7 @@ import {
 	hkdf,
 	MISSING_KEYS_ERROR_TEXT,
 	NACK_REASONS,
+	retryReasonFor,
 	NO_MESSAGE_FOUND_ERROR_TEXT,
 	buildAckStanza,
 	unixTimestampSeconds,
@@ -265,7 +266,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		await query(stanza)
 	}
 
-	const sendRetryRequest = async (node: BinaryNode, forceIncludeKeys = false) => {
+	const sendRetryRequest = async (node: BinaryNode, forceIncludeKeys = false, retryReason?: string) => {
 		const { fullMessage, author } = decodeMessageNode(node, authState.creds.me!.id, authState.creds.me!.lid || '')
 		const { key: msgKey } = fullMessage
 		const msgId = msgKey.id!
@@ -306,7 +307,10 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 							count: retryCount.toString(),
 							id: node.attrs.id,
 							t: node.attrs.t,
-							v: '1'
+							v: '1',
+							// sem o motivo o remetente reenvia o mesmo skmsg e o decrypt falha de novo:
+							// error=1 pede redistribuição da sender key, error=3 pede novo bundle de pre-key
+							...(retryReason ? { error: retryReason } : {})
 						}
 					},
 					{
@@ -1080,8 +1084,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 									return
 								}
 
-								const encNode = getBinaryNodeChild(node, 'enc')
-								await sendRetryRequest(node, true)
+								await sendRetryRequest(node, true, retryReasonFor(msg.messageStubParameters?.[0]))
 								if (retryRequestDelayMs) {
 									await delay(retryRequestDelayMs)
 								}

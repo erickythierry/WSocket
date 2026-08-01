@@ -16,7 +16,7 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     }>;
     productUpdate: (productId: string, update: import("../Types").ProductUpdate) => Promise<import("../Types").Product>;
     sendMessageAck: (node: import("..").BinaryNode, errorCode?: number) => Promise<void>;
-    sendRetryRequest: (node: import("..").BinaryNode, forceIncludeKeys?: boolean) => Promise<void>;
+    sendRetryRequest: (node: import("..").BinaryNode, forceIncludeKeys?: boolean, retryReason?: string) => Promise<void>;
     rejectCall: (callId: string, callFrom: string) => Promise<void>;
     fetchMessageHistory: (count: number, oldestMsgKey: import("../Types").WAMessageKey, oldestMsgTimestamp: number | Long) => Promise<string>;
     requestPlaceholderResend: (messageKey: import("../Types").WAMessageKey) => Promise<string | undefined>;

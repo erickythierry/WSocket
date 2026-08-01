@@ -18,6 +18,23 @@ export declare const prepareDisappearingMessageSettingContent: (ephemeralExpirat
  * @param options.forceForward will show the message as forwarded even if it is from you
  */
 export declare const generateForwardMessageContent: (message: WAMessage, forceForward?: boolean) => proto.IMessage;
+export type PixKeyType = 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'EVP';
+export type PixPaymentInfo = {
+    /** chave PIX já normalizada (telefone com DDI, CPF/CNPJ só dígitos) */
+    key: string;
+    keyType: PixKeyType;
+    /** nome exibido como recebedor no card */
+    merchantName: string;
+    referenceId?: string;
+};
+/**
+ * Monta o botão native flow `payment_info` (card de PIX) para `interactiveButtons`.
+ *
+ * O iOS descarta a mensagem quando o buttonParamsJson vem reduzido (só
+ * payment_settings); o Android tolera. Por isso o payload precisa vir completo
+ * com order/total_amount/currency, mesmo com valores zerados.
+ */
+export declare const generatePixButton: ({ key, keyType, merchantName, referenceId }: PixPaymentInfo) => proto.Message.InteractiveMessage.NativeFlowMessage.INativeFlowButton;
 export declare const generateWAMessageContent: (message: AnyMessageContent, options: MessageContentGenerationOptions) => Promise<proto.Message>;
 export declare const generateWAMessageFromContent: (jid: string, message: WAMessageContent, options: MessageGenerationOptionsFromContent) => proto.WebMessageInfo;
 export declare const generateWAMessage: (jid: string, content: AnyMessageContent, options: MessageGenerationOptions) => Promise<proto.WebMessageInfo>;

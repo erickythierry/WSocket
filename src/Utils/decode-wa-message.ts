@@ -21,6 +21,35 @@ import caches from './cache-utils'
 export const NO_MESSAGE_FOUND_ERROR_TEXT = 'Message absent from node'
 export const MISSING_KEYS_ERROR_TEXT = 'Key used already or never filled'
 
+/** erros de decrypt que significam "não tenho a chave/sessão" — o remetente precisa redistribuir */
+const MISSING_SESSION_ERRORS = new Set([
+	// grupo (sender key ausente ou keyId desconhecido — ver Signal/Group/group_cipher)
+	'No session found to decrypt message',
+	'No SenderKeyRecord found for decryption',
+	// 1:1 (libsignal)
+	'No session record',
+	'No matching sessions found for message',
+	'No sessions available'
+])
+
+const MISSING_PRE_KEY_ERRORS = new Set(['Invalid PreKey ID', 'Missing SignedPreKey'])
+
+/**
+ * Motivo enviado no atributo `error` do retry receipt.
+ * `1` = sender key/sessão ausente (pede redistribuição), `3` = pre-key inválida (pede novo bundle).
+ */
+export const retryReasonFor = (decryptError?: string) => {
+	if (!decryptError) {
+		return undefined
+	}
+
+	if (MISSING_SESSION_ERRORS.has(decryptError)) {
+		return '1'
+	}
+
+	return MISSING_PRE_KEY_ERRORS.has(decryptError) ? '3' : undefined
+}
+
 export const NACK_REASONS = {
 	ParsingError: 487,
 	UnrecognizedStanza: 488,

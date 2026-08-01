@@ -367,6 +367,59 @@ export const generateForwardMessageContent = (message: WAMessage, forceForward?:
 	return content;
 };
 
+export type PixKeyType = 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'EVP';
+
+export type PixPaymentInfo = {
+	/** chave PIX já normalizada (telefone com DDI, CPF/CNPJ só dígitos) */
+	key: string;
+	keyType: PixKeyType;
+	/** nome exibido como recebedor no card */
+	merchantName: string;
+	referenceId?: string;
+};
+
+/**
+ * Monta o botão native flow `payment_info` (card de PIX) para `interactiveButtons`.
+ *
+ * O iOS descarta a mensagem quando o buttonParamsJson vem reduzido (só
+ * payment_settings); o Android tolera. Por isso o payload precisa vir completo
+ * com order/total_amount/currency, mesmo com valores zerados.
+ */
+export const generatePixButton = ({
+	key,
+	keyType,
+	merchantName,
+	referenceId = randomBytes(8).toString('hex')
+}: PixPaymentInfo): proto.Message.InteractiveMessage.NativeFlowMessage.INativeFlowButton => ({
+	name: 'payment_info',
+	buttonParamsJson: JSON.stringify({
+		currency: 'BRL',
+		total_amount: { value: 0, offset: 1 },
+		reference_id: referenceId,
+		type: 'physical-goods',
+		order: {
+			status: 'payment_requested',
+			order_type: 'ORDER_WITHOUT_AMOUNT',
+			subtotal: { value: 0, offset: 1 },
+			items: [
+				{
+					name: '',
+					retailer_id: `custom-item-${referenceId}`,
+					amount: { value: 0, offset: 1 },
+					quantity: 0
+				}
+			]
+		},
+		payment_settings: [
+			{
+				type: 'pix_static_code',
+				pix_static_code: { key, key_type: keyType, merchant_name: merchantName }
+			},
+			{ type: 'cards', cards: { enabled: false } }
+		]
+	})
+});
+
 export const generateWAMessageContent = async (
 	message: AnyMessageContent,
 	options: MessageContentGenerationOptions
@@ -642,6 +695,12 @@ export const generateWAMessageContent = async (
 		};
 
 		m = { interactiveMessage };
+
+		// O card de PIX (payment_info) só renderiza no iOS quando a mensagem
+		// carrega um messageSecret próprio, como nas enquetes.
+		if (buttons?.some(button => button.name === 'payment_info')) {
+			m.messageContextInfo = { messageSecret: randomBytes(32) };
+		}
 	}
 
 	if ('sections' in message && !!message.sections) {
