@@ -38,10 +38,12 @@ import {
 import { getUrlInfo } from '../Utils/link-preview'
 import { BoundedTtlMap } from '../Utils/bounded-ttl-map'
 import { generateCsToken, readNctSalt } from '../Utils/cs-token-utils'
-import { makeMutex } from '../Utils/make-mutex'
+import { makeMutex, makeSemaphore } from '../Utils/make-mutex'
 import {
 	buildMergedTcTokenIndexWrite,
+	isRegularUser,
 	isTcTokenExpired,
+	resolvePrivacyTokenIntent,
 	resolveTcTokenStorageJid,
 	shouldSendNewTcToken,
 	storeTcTokensFromIqResult,
@@ -96,7 +98,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 	const inFlightTcTokenIssuance = new Set<string>()
 	const TC_TOKEN_MAX_CONCURRENT_ISSUANCE = 2
-	let activeTcTokenIssuance = 0
+	// teto único pros dois caminhos: emissão pós-envio desiste quando não há vaga (a próxima
+	// mensagem tenta de novo), reemissão por troca de identidade entra na fila e espera
+	const tcTokenIssuanceSemaphore = makeSemaphore(TC_TOKEN_MAX_CONCURRENT_ISSUANCE)
 
 	const TC_TOKEN_INDEX_FLUSH_MAX_PENDING = 100
 	const TC_TOKEN_INDEX_MAX_PENDING = 5_000
@@ -957,15 +961,20 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 
 			const isPeerMessage = additionalAttributes?.['category'] === 'peer'
-			const is1on1Send =
-				!participant &&
-				!isGroup &&
-				!isStatus &&
-				!isNewsletter &&
-				!isretry &&
-				!isPeerMessage &&
-				(isJidUser(destinationJid) || isLidUser(destinationJid))
-			const tcTokenJid = is1on1Send ? tcTokenStorageJid(destinationJid) : undefined
+			const privacyTokenIntent = resolvePrivacyTokenIntent({
+				isUserDestination: !!(isJidUser(destinationJid) || isLidUser(destinationJid)),
+				isGroup,
+				isStatus,
+				isNewsletter,
+				isPeer: isPeerMessage,
+				isRetry: !!isretry,
+				hasParticipant: !!participant,
+				isSelfParticipant:
+					!!participant &&
+					(areJidsSameUser(participant.jid, meId) || areJidsSameUser(participant.jid, meLid))
+			})
+			const is1on1Send = privacyTokenIntent === 'send'
+			const tcTokenJid = privacyTokenIntent !== 'none' ? tcTokenStorageJid(destinationJid) : undefined
 			let tcTokenEntry: SignalDataTypeMap['tctoken'] | undefined
 			let tcTokenReadFailed = false
 			if (tcTokenJid) {
@@ -1010,11 +1019,12 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 						recipient: jidNormalizedUser(destinationJid),
 						storageJid: tcTokenJid,
 						privacyTokenType: 'tctoken',
-						tcTokenState
+						tcTokenState,
+						isretry: !!isretry
 					},
 					'mensagem 1:1 protegida por tctoken'
 				)
-			} else if (is1on1Send && tcTokenJid) {
+			} else if (tcTokenJid) {
 				const csTokenResult = await buildCsTokenForJid(destinationJid)
 				if (csTokenResult.token?.length) {
 					;(stanza.content as BinaryNode[]).push({ tag: 'cstoken', attrs: {}, content: csTokenResult.token })
@@ -1026,7 +1036,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 							storageJid: tcTokenJid,
 							privacyTokenType: 'cstoken',
 							tcTokenReadFailed,
-							tcTokenState
+							tcTokenState,
+							isretry: !!isretry
 						},
 						'mensagem 1:1 protegida por cstoken'
 					)
@@ -1040,7 +1051,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 							privacyTokenType: 'none',
 							reason: csTokenResult.reason,
 							tcTokenReadFailed,
-							tcTokenState
+							tcTokenState,
+							isretry: !!isretry
 						},
 						'mensagem 1:1 sem privacy token'
 					)
@@ -1276,10 +1288,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			const current = await authState.keys.get('tctoken', [options.storageJid])
 			if (!shouldSendNewTcToken(current[options.storageJid]?.senderTimestamp)) return
 			if (inFlightTcTokenIssuance.has(options.storageJid)) return
-			if (activeTcTokenIssuance >= TC_TOKEN_MAX_CONCURRENT_ISSUANCE) return
+			if (!tcTokenIssuanceSemaphore.tryAcquire()) return
 
 			inFlightTcTokenIssuance.add(options.storageJid)
-			activeTcTokenIssuance += 1
 			const issueTimestamp = unixTimestampSeconds()
 			try {
 				const result = await getPrivacyTokens([jid], issueTimestamp)
@@ -1320,10 +1331,70 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				)
 			} finally {
 				inFlightTcTokenIssuance.delete(options.storageJid)
-				activeTcTokenIssuance -= 1
+				tcTokenIssuanceSemaphore.release()
 			}
 		} catch (err) {
 			logger.debug({ jid, err: (err as Error)?.message }, 'falha ao emitir tctoken')
+		}
+	}
+
+	/**
+	 * Quando o contato troca de identidade Signal, o token que emitimos pra ele deixa de valer.
+	 * Reemite reusando o senderTimestamp armazenado, pra não avançar o bucket de emissão.
+	 */
+	async function reissueTcTokenAfterIdentityChange(jid: string) {
+		try {
+			// só a identidade do device primário conta; companion trocando de chave não invalida o token
+			if (jidDecode(jid)?.device) return
+			// troca da nossa própria identidade não é reach-out: não há token nosso pra reemitir
+			if (
+				areJidsSameUser(jid, authState.creds.me?.id) ||
+				areJidsSameUser(jid, authState.creds.me?.lid)
+			) {
+				return
+			}
+
+			if (!isRegularUser(jidNormalizedUser(jid))) return
+
+			const storageJid = tcTokenStorageJid(jid)
+			const entry = (await authState.keys.get('tctoken', [storageJid]))[storageJid]
+			const senderTimestamp = entry?.senderTimestamp
+			// nunca emitimos pra esse contato, ou a janela do emissor já expirou: nada a reemitir
+			if (senderTimestamp === undefined || isTcTokenExpired(senderTimestamp)) return
+			if (inFlightTcTokenIssuance.has(storageJid)) return
+
+			inFlightTcTokenIssuance.add(storageJid)
+			try {
+				// espera vaga em vez de desistir: reemissão não tem segunda chance, ao contrário
+				// da emissão pós-envio, que a próxima mensagem repete
+				await tcTokenIssuanceSemaphore.acquire()
+				try {
+					const result = await getPrivacyTokens([jid], senderTimestamp)
+					const storedJids = await storeTcTokensFromIqResult({
+						result,
+						fallbackJid: storageJid,
+						keys: authState.keys,
+						resolveLid: getLidForPn,
+						onNewJidStored: trackTcTokenJid
+					})
+					logger.info(
+						{
+							event: 'tc_token_reissued_identity_change',
+							recipient: jidNormalizedUser(jid),
+							storageJid,
+							senderTimestamp,
+							recipientTokenStored: storedJids.includes(storageJid)
+						},
+						'tc token reemitido após troca de identidade'
+					)
+				} finally {
+					tcTokenIssuanceSemaphore.release()
+				}
+			} finally {
+				inFlightTcTokenIssuance.delete(storageJid)
+			}
+		} catch (err) {
+			logger.debug({ jid, err: (err as Error)?.message }, 'falha ao reemitir tctoken após troca de identidade')
 		}
 	}
 
@@ -1362,6 +1433,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	return {
 		...sock,
 		getPrivacyTokens,
+		reissueTcTokenAfterIdentityChange,
 		getLidForPn,
 		cacheLidMapping,
 		tcTokenStorageJid,

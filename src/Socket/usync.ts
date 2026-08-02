@@ -24,7 +24,10 @@ export const makeUSyncSocket = (config: SocketConfig) => {
 				attrs: {
 					jid: !user.phone ? user.id : undefined
 				},
-				content: usyncQuery.protocols.map(a => a.getUserElement(user)).filter(a => a !== null)
+				content: [
+					...usyncQuery.protocols.map(a => a.getUserElement(user)).filter(a => a !== null),
+					...(user.content || [])
+				]
 			} as BinaryNode
 		})
 

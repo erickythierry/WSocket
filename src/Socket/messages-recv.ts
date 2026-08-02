@@ -102,7 +102,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		tcTokenStorageJid,
 		trackTcTokenJid,
 		flushTcTokenIndex,
-		withFlushedTcTokenIndex
+		withFlushedTcTokenIndex,
+		reissueTcTokenAfterIdentityChange
 	} = sock
 
 	/** this mutex ensures that each retryRequest will wait for the previous one to finish */
@@ -373,8 +374,9 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			const identityNode = getBinaryNodeChild(node, 'identity')
 			if (identityNode) {
 				logger.info({ jid: from }, 'identity changed')
-				// not handling right now
-				// signal will override new identity anyway
+				// signal sobrescreve a identidade sozinho, mas o tctoken que emitimos pra esse
+				// contato morre junto com a identidade antiga — reemite pra não tomar 463 depois
+				void reissueTcTokenAfterIdentityChange(from)
 			} else {
 				logger.info({ node }, 'unknown encrypt notification')
 			}

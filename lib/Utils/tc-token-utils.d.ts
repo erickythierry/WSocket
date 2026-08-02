@@ -18,6 +18,22 @@ export declare function buildMergedTcTokenIndexWrite(keys: SignalKeyStore, added
 }>;
 export declare function buildTcTokenIndexEntry(jids: Iterable<string>, pruneTs?: string | number): TcTokenIndexEntry;
 export declare function isTcTokenExpired(timestamp: number | string | null | undefined): boolean;
+/**
+ * - `send`: mensagem 1:1 normal — anexa token e emite um novo pro destinatário depois do envio
+ * - `retry`: reenvio de retry receipt — anexa token (sem ele o servidor nacka com 463), mas não
+ *   emite: cada emissão conta como novo reach-out e piora a restrição da conta
+ * - `none`: grupo, status, newsletter, peer sync ou retry do nosso próprio device
+ */
+export declare function resolvePrivacyTokenIntent(params: {
+    isUserDestination: boolean;
+    isGroup?: boolean;
+    isStatus?: boolean;
+    isNewsletter?: boolean;
+    isPeer?: boolean;
+    isRetry?: boolean;
+    hasParticipant?: boolean;
+    isSelfParticipant?: boolean;
+}): 'send' | 'retry' | 'none';
 export declare function shouldSendNewTcToken(senderTimestamp: number | undefined): boolean;
 type BuildParams = {
     jid: string;

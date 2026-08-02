@@ -6,6 +6,7 @@ import { BinaryNode, JidWithDevice } from '../WABinary';
 import { USyncQuery } from '../WAUSync';
 export declare const makeMessagesSocket: (config: SocketConfig) => {
     getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<any>;
+    reissueTcTokenAfterIdentityChange: (jid: string) => Promise<void>;
     getLidForPn: LidResolver;
     cacheLidMapping: (pnJid?: string, lidJid?: string) => void;
     tcTokenStorageJid: (jid: string) => string;

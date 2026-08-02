@@ -238,8 +238,25 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	const fetchStatus = async (...jids: string[]) => {
 		const usyncQuery = new USyncQuery().withStatusProtocol()
 
-		for (const jid of jids) {
-			usyncQuery.withUser(new USyncUser().withId(jid))
+		// sem o tctoken o servidor devolve 401 no status de contato com privacidade restrita.
+		// leitura em paralelo: serial daria uma ida ao keystore por contato
+		const users = await Promise.all(
+			jids.map(async jid => {
+				const user = new USyncUser().withId(jid)
+				const tcTokenContent =
+					isJidUser(jid) || isLidUser(jid)
+						? await buildTcTokenFromJid({
+								keys: authState.keys,
+								jid,
+								resolveLid: pn => caches.lidCache.get(jidNormalizedUser(pn))
+							})
+						: undefined
+				return tcTokenContent?.length ? user.withContent(tcTokenContent) : user
+			})
+		)
+
+		for (const user of users) {
+			usyncQuery.withUser(user)
 		}
 
 		const result = await sock.executeUSyncQuery(usyncQuery)

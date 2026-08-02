@@ -97,6 +97,32 @@ export function isTcTokenExpired(timestamp: number | string | null | undefined):
 	return ts < cutoffTimestamp
 }
 
+/**
+ * - `send`: mensagem 1:1 normal — anexa token e emite um novo pro destinatário depois do envio
+ * - `retry`: reenvio de retry receipt — anexa token (sem ele o servidor nacka com 463), mas não
+ *   emite: cada emissão conta como novo reach-out e piora a restrição da conta
+ * - `none`: grupo, status, newsletter, peer sync ou retry do nosso próprio device
+ */
+export function resolvePrivacyTokenIntent(params: {
+	isUserDestination: boolean
+	isGroup?: boolean
+	isStatus?: boolean
+	isNewsletter?: boolean
+	isPeer?: boolean
+	isRetry?: boolean
+	hasParticipant?: boolean
+	isSelfParticipant?: boolean
+}): 'send' | 'retry' | 'none' {
+	const isPlain1on1 =
+		params.isUserDestination && !params.isGroup && !params.isStatus && !params.isNewsletter && !params.isPeer
+	if (!isPlain1on1) return 'none'
+	if (params.isRetry) {
+		return params.hasParticipant && !params.isSelfParticipant ? 'retry' : 'none'
+	}
+
+	return params.hasParticipant ? 'none' : 'send'
+}
+
 export function shouldSendNewTcToken(senderTimestamp: number | undefined): boolean {
 	if (senderTimestamp === undefined) return true
 	const currentBucket = Math.floor(Date.now() / 1000 / TC_TOKEN_BUCKET_DURATION)

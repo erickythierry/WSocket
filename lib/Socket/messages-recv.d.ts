@@ -10,6 +10,7 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     fetchMessageHistory: (count: number, oldestMsgKey: WAMessageKey, oldestMsgTimestamp: number | Long) => Promise<string>;
     requestPlaceholderResend: (messageKey: WAMessageKey) => Promise<string | undefined>;
     getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<any>;
+    reissueTcTokenAfterIdentityChange: (jid: string) => Promise<void>;
     getLidForPn: import("../Utils").LidResolver;
     cacheLidMapping: (pnJid?: string, lidJid?: string) => void;
     tcTokenStorageJid: (jid: string) => string;

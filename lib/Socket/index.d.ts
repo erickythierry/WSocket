@@ -21,6 +21,7 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     fetchMessageHistory: (count: number, oldestMsgKey: import("../Types").WAMessageKey, oldestMsgTimestamp: number | Long) => Promise<string>;
     requestPlaceholderResend: (messageKey: import("../Types").WAMessageKey) => Promise<string | undefined>;
     getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<any>;
+    reissueTcTokenAfterIdentityChange: (jid: string) => Promise<void>;
     getLidForPn: import("..").LidResolver;
     cacheLidMapping: (pnJid?: string, lidJid?: string) => void;
     tcTokenStorageJid: (jid: string) => string;

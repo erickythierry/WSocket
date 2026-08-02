@@ -11,9 +11,11 @@ import {
 	storeNctSaltFromHistorySync
 } from '../Utils/cs-token-utils'
 import { downloadHistory } from '../Utils/history'
+import { makeSemaphore } from '../Utils/make-mutex'
 import processMessage from '../Utils/process-message'
 import {
 	isTcTokenExpired,
+	resolvePrivacyTokenIntent,
 	resolveTcTokenStorageJid,
 	storeTcTokensFromHistorySync,
 	storeTcTokensFromIqResult
@@ -156,5 +158,53 @@ describe('lifecycle TC/CS token', () => {
 		expect(await readNctSalt(keys)).toEqual(salt)
 		expect(stores.tctoken[lid].token).toEqual(token)
 		expect(historyEmitted).toBe(false)
+	})
+
+	it('semáforo de emissão respeita o teto com desistência e espera juntas', async () => {
+		const semaphore = makeSemaphore(2)
+
+		// emissões normais ocupam os dois permits; a terceira desiste
+		expect(semaphore.tryAcquire()).toBe(true)
+		expect(semaphore.tryAcquire()).toBe(true)
+		expect(semaphore.tryAcquire()).toBe(false)
+		expect(semaphore.active).toBe(2)
+
+		// reemissão espera em vez de desistir
+		let reissued = false
+		const waiting = semaphore.acquire().then(() => { reissued = true })
+		await Promise.resolve()
+		expect(reissued).toBe(false)
+		expect(semaphore.active).toBe(2)
+
+		// permit liberado passa direto pra fila, sem estourar o teto
+		semaphore.release()
+		await waiting
+		expect(reissued).toBe(true)
+		expect(semaphore.active).toBe(2)
+		expect(semaphore.tryAcquire()).toBe(false)
+
+		semaphore.release()
+		semaphore.release()
+		expect(semaphore.active).toBe(0)
+	})
+
+	it('decide anexo/emissão de privacy token por tipo de envio', () => {
+		const base = { isUserDestination: true }
+
+		// 1:1 normal: anexa e emite
+		expect(resolvePrivacyTokenIntent(base)).toBe('send')
+		// retry para o contato: anexa, mas não emite (novo reach-out piora restrição)
+		expect(resolvePrivacyTokenIntent({ ...base, isRetry: true, hasParticipant: true })).toBe('retry')
+		// retry para device nosso: stanza vai pra nós mesmos
+		expect(
+			resolvePrivacyTokenIntent({ ...base, isRetry: true, hasParticipant: true, isSelfParticipant: true })
+		).toBe('none')
+		// grupo, status, newsletter e peer sync ficam de fora
+		expect(resolvePrivacyTokenIntent({ isUserDestination: false, isGroup: true })).toBe('none')
+		expect(resolvePrivacyTokenIntent({ ...base, isStatus: true })).toBe('none')
+		expect(resolvePrivacyTokenIntent({ ...base, isNewsletter: true })).toBe('none')
+		expect(resolvePrivacyTokenIntent({ ...base, isPeer: true })).toBe('none')
+		// fanout direcionado sem retry (participant explícito) também não emite
+		expect(resolvePrivacyTokenIntent({ ...base, hasParticipant: true })).toBe('none')
 	})
 })
