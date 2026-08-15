@@ -1,4 +1,4 @@
-syntax = "proto3";
+syntax = "proto2";
 package proto;
 
 /// WhatsApp Version: 2.3000.1023047013
@@ -1057,6 +1057,7 @@ message ContextInfo {
     optional bool isQuestion = 63;
     optional StatusSourceType statusSourceType = 64;
     optional ForwardOrigin forwardOrigin = 67;
+    optional bool isGroupStatus = 66;
     enum ForwardOrigin {
         UNKNOWN = 0;
         CHAT = 1;
@@ -1773,6 +1774,7 @@ message Message {
     optional FutureProofMessage botTaskMessage = 100;
     optional FutureProofMessage questionMessage = 101;
     optional MessageHistoryNotice messageHistoryNotice = 102;
+    optional FutureProofMessage groupStatusMessageV2 = 103;
     optional FutureProofMessage botForwardedMessage = 104;
     message AlbumMessage {
         optional uint32 expectedImageCount = 2;
