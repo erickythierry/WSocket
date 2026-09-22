@@ -804,6 +804,18 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				const senderKeyJids: string[] = []
 				// sender key rotacionada (selective relay) precisa ser redistribuída a todos
 				const skdmToAll = !!excludeJids?.length || !!includeJids?.length
+				if (skdmToAll && !participant) {
+					// a chave antiga morreu na rotação e o SKDM da nova só vai pros devices que
+					// sobraram no relay seletivo. Sem zerar o map, os de fora continuam marcados
+					// como "já recebeu" e nunca ganham a chave nova => todas as mensagens
+					// seguintes do grupo ficam em "aguardando" pra eles. Zerado, o próximo envio
+					// normal redistribui o SKDM (já na iteração atual, então o skmsg seletivo
+					// continua indecifrável pra quem ficou de fora).
+					for (const key of Object.keys(senderKeyMap)) {
+						delete senderKeyMap[key]
+					}
+				}
+
 				for (const { user, device, jid } of devices) {
 					const server = jidDecode(jid)?.server || 'lid'
 					const senderId = jidEncode(user, server, device)

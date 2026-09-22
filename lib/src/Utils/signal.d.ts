@@ -1,0 +1,52 @@
+import { SignalRepository } from '../Types';
+import { AuthenticationCreds, AuthenticationState, KeyPair, SignalIdentity, SignalKeyStore, SignedKeyPair } from '../Types/Auth';
+import { BinaryNode, JidWithDevice } from '../WABinary';
+import { USyncQueryResultList } from '../WAUSync';
+export declare const createSignalIdentity: (wid: string, accountSignatureKey: Uint8Array) => SignalIdentity;
+export declare const getPreKeys: ({ get }: SignalKeyStore, min: number, limit: number) => Promise<{
+    [id: string]: KeyPair;
+}>;
+export declare const generateOrGetPreKeys: (creds: AuthenticationCreds, range: number) => {
+    newPreKeys: {
+        [id: number]: KeyPair;
+    };
+    lastPreKeyId: number;
+    preKeysRange: readonly [number, number];
+};
+export declare const xmppSignedPreKey: (key: SignedKeyPair) => BinaryNode;
+export declare const xmppPreKey: (pair: KeyPair, id: number) => BinaryNode;
+/**
+ * Extrai o bundle de chaves (registration/identity/skey/key) que o receptor
+ * inclui no retry receipt quando não consegue decriptar. Portado do upstream
+ * WhiskeySockets/Baileys v7 — permite reestabelecer a sessão direto do receipt,
+ * sem depender de usync/assertSessions.
+ */
+export declare const extractE2ESessionFromRetryReceipt: (receipt: BinaryNode) => {
+    registrationId: number;
+    identityKey: Buffer<ArrayBufferLike>;
+    signedPreKey: {
+        keyId: number;
+        publicKey: Buffer<ArrayBufferLike>;
+        signature: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>;
+    };
+    preKey: {
+        keyId: number;
+        publicKey: Uint8Array;
+    } | undefined;
+} | null;
+export declare const parseAndInjectE2ESessions: (node: BinaryNode, repository: SignalRepository, lid?: string | null | undefined, meid?: string, melid?: string) => Promise<void>;
+export declare const extractDeviceJids: (result: USyncQueryResultList[], myJid: string, excludeZeroDevices: boolean, mylid?: string) => JidWithDevice[];
+/**
+ * get the next N keys for upload or processing
+ * @param count number of pre-keys to get or generate
+ */
+export declare const getNextPreKeys: ({ creds, keys }: AuthenticationState, count: number) => Promise<{
+    update: Partial<AuthenticationCreds>;
+    preKeys: {
+        [id: string]: KeyPair;
+    };
+}>;
+export declare const getNextPreKeysNode: (state: AuthenticationState, count: number) => Promise<{
+    update: Partial<AuthenticationCreds>;
+    node: BinaryNode;
+}>;
