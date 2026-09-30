@@ -10875,6 +10875,9 @@ export namespace proto {
         /** ContextInfo rankingVersion */
         rankingVersion?: (number|null);
 
+        /** ContextInfo afterReadDuration */
+        afterReadDuration?: (number|null);
+
         /** ContextInfo memberLabel */
         memberLabel?: (proto.IMemberLabel|null);
 
@@ -11031,6 +11034,9 @@ export namespace proto {
 
         /** ContextInfo rankingVersion. */
         public rankingVersion: number;
+
+        /** ContextInfo afterReadDuration. */
+        public afterReadDuration: number;
 
         /** ContextInfo memberLabel. */
         public memberLabel?: (proto.IMemberLabel|null);

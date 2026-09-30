@@ -30237,6 +30237,7 @@ $root.proto = (function() {
          * @property {proto.IUrlTrackingMap|null} [urlTrackingMap] ContextInfo urlTrackingMap
          * @property {proto.ContextInfo.PairedMediaType|null} [pairedMediaType] ContextInfo pairedMediaType
          * @property {number|null} [rankingVersion] ContextInfo rankingVersion
+         * @property {number|null} [afterReadDuration] ContextInfo afterReadDuration
          * @property {proto.IMemberLabel|null} [memberLabel] ContextInfo memberLabel
          * @property {boolean|null} [isQuestion] ContextInfo isQuestion
          * @property {proto.ContextInfo.StatusSourceType|null} [statusSourceType] ContextInfo statusSourceType
@@ -30614,6 +30615,14 @@ $root.proto = (function() {
         ContextInfo.prototype.rankingVersion = 0;
 
         /**
+         * ContextInfo afterReadDuration.
+         * @member {number} afterReadDuration
+         * @memberof proto.ContextInfo
+         * @instance
+         */
+        ContextInfo.prototype.afterReadDuration = 0;
+
+        /**
          * ContextInfo memberLabel.
          * @member {proto.IMemberLabel|null|undefined} memberLabel
          * @memberof proto.ContextInfo
@@ -30767,6 +30776,8 @@ $root.proto = (function() {
                 writer.uint32(/* id 59, wireType 0 =*/472).int32(message.pairedMediaType);
             if (message.rankingVersion != null && Object.hasOwnProperty.call(message, "rankingVersion"))
                 writer.uint32(/* id 60, wireType 0 =*/480).uint32(message.rankingVersion);
+            if (message.afterReadDuration != null && Object.hasOwnProperty.call(message, "afterReadDuration"))
+                writer.uint32(/* id 76, wireType 0 =*/608).uint32(message.afterReadDuration);
             if (message.memberLabel != null && Object.hasOwnProperty.call(message, "memberLabel"))
                 $root.proto.MemberLabel.encode(message.memberLabel, writer.uint32(/* id 62, wireType 2 =*/498).fork()).ldelim();
             if (message.isQuestion != null && Object.hasOwnProperty.call(message, "isQuestion"))
@@ -30995,6 +31006,10 @@ $root.proto = (function() {
                     }
                 case 60: {
                         message.rankingVersion = reader.uint32();
+                        break;
+                    }
+                case 76: {
+                        message.afterReadDuration = reader.uint32();
                         break;
                     }
                 case 62: {
@@ -31240,6 +31255,9 @@ $root.proto = (function() {
             if (message.rankingVersion != null && message.hasOwnProperty("rankingVersion"))
                 if (!$util.isInteger(message.rankingVersion))
                     return "rankingVersion: integer expected";
+            if (message.afterReadDuration != null && message.hasOwnProperty("afterReadDuration"))
+                if (!$util.isInteger(message.afterReadDuration))
+                    return "afterReadDuration: integer expected";
             if (message.memberLabel != null && message.hasOwnProperty("memberLabel")) {
                 var error = $root.proto.MemberLabel.verify(message.memberLabel, long + 1);
                 if (error)
@@ -31502,6 +31520,8 @@ $root.proto = (function() {
             }
             if (object.rankingVersion != null)
                 message.rankingVersion = object.rankingVersion >>> 0;
+            if (object.afterReadDuration != null)
+                message.afterReadDuration = object.afterReadDuration >>> 0;
             if (object.memberLabel != null) {
                 if (typeof object.memberLabel !== "object")
                     throw TypeError(".proto.ContextInfo.memberLabel: object expected");
@@ -31660,6 +31680,7 @@ $root.proto = (function() {
                 object.urlTrackingMap = null;
                 object.pairedMediaType = options.enums === String ? "NOT_PAIRED_MEDIA" : 0;
                 object.rankingVersion = 0;
+                object.afterReadDuration = 0;
                 object.memberLabel = null;
                 object.isQuestion = false;
                 object.statusSourceType = options.enums === String ? "IMAGE" : 0;
@@ -31765,6 +31786,8 @@ $root.proto = (function() {
                 object.pairedMediaType = options.enums === String ? $root.proto.ContextInfo.PairedMediaType[message.pairedMediaType] === undefined ? message.pairedMediaType : $root.proto.ContextInfo.PairedMediaType[message.pairedMediaType] : message.pairedMediaType;
             if (message.rankingVersion != null && message.hasOwnProperty("rankingVersion"))
                 object.rankingVersion = message.rankingVersion;
+            if (message.afterReadDuration != null && message.hasOwnProperty("afterReadDuration"))
+                object.afterReadDuration = message.afterReadDuration;
             if (message.memberLabel != null && message.hasOwnProperty("memberLabel"))
                 object.memberLabel = $root.proto.MemberLabel.toObject(message.memberLabel, options);
             if (message.isQuestion != null && message.hasOwnProperty("isQuestion"))
