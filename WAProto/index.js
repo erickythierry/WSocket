@@ -30238,6 +30238,7 @@ $root.proto = (function() {
          * @property {proto.ContextInfo.PairedMediaType|null} [pairedMediaType] ContextInfo pairedMediaType
          * @property {number|null} [rankingVersion] ContextInfo rankingVersion
          * @property {number|null} [afterReadDuration] ContextInfo afterReadDuration
+         * @property {boolean|null} [isSpoiler] ContextInfo isSpoiler
          * @property {proto.IMemberLabel|null} [memberLabel] ContextInfo memberLabel
          * @property {boolean|null} [isQuestion] ContextInfo isQuestion
          * @property {proto.ContextInfo.StatusSourceType|null} [statusSourceType] ContextInfo statusSourceType
@@ -30623,6 +30624,14 @@ $root.proto = (function() {
         ContextInfo.prototype.afterReadDuration = 0;
 
         /**
+         * ContextInfo isSpoiler.
+         * @member {boolean} isSpoiler
+         * @memberof proto.ContextInfo
+         * @instance
+         */
+        ContextInfo.prototype.isSpoiler = false;
+
+        /**
          * ContextInfo memberLabel.
          * @member {proto.IMemberLabel|null|undefined} memberLabel
          * @memberof proto.ContextInfo
@@ -30778,6 +30787,8 @@ $root.proto = (function() {
                 writer.uint32(/* id 60, wireType 0 =*/480).uint32(message.rankingVersion);
             if (message.afterReadDuration != null && Object.hasOwnProperty.call(message, "afterReadDuration"))
                 writer.uint32(/* id 76, wireType 0 =*/608).uint32(message.afterReadDuration);
+            if (message.isSpoiler != null && Object.hasOwnProperty.call(message, "isSpoiler"))
+                writer.uint32(/* id 73, wireType 0 =*/584).bool(message.isSpoiler);
             if (message.memberLabel != null && Object.hasOwnProperty.call(message, "memberLabel"))
                 $root.proto.MemberLabel.encode(message.memberLabel, writer.uint32(/* id 62, wireType 2 =*/498).fork()).ldelim();
             if (message.isQuestion != null && Object.hasOwnProperty.call(message, "isQuestion"))
@@ -31010,6 +31021,10 @@ $root.proto = (function() {
                     }
                 case 76: {
                         message.afterReadDuration = reader.uint32();
+                        break;
+                    }
+                case 73: {
+                        message.isSpoiler = reader.bool();
                         break;
                     }
                 case 62: {
@@ -31258,6 +31273,9 @@ $root.proto = (function() {
             if (message.afterReadDuration != null && message.hasOwnProperty("afterReadDuration"))
                 if (!$util.isInteger(message.afterReadDuration))
                     return "afterReadDuration: integer expected";
+            if (message.isSpoiler != null && message.hasOwnProperty("isSpoiler"))
+                if (typeof message.isSpoiler !== "boolean")
+                    return "isSpoiler: boolean expected";
             if (message.memberLabel != null && message.hasOwnProperty("memberLabel")) {
                 var error = $root.proto.MemberLabel.verify(message.memberLabel, long + 1);
                 if (error)
@@ -31522,6 +31540,8 @@ $root.proto = (function() {
                 message.rankingVersion = object.rankingVersion >>> 0;
             if (object.afterReadDuration != null)
                 message.afterReadDuration = object.afterReadDuration >>> 0;
+            if (object.isSpoiler != null)
+                message.isSpoiler = Boolean(object.isSpoiler);
             if (object.memberLabel != null) {
                 if (typeof object.memberLabel !== "object")
                     throw TypeError(".proto.ContextInfo.memberLabel: object expected");
@@ -31681,6 +31701,7 @@ $root.proto = (function() {
                 object.pairedMediaType = options.enums === String ? "NOT_PAIRED_MEDIA" : 0;
                 object.rankingVersion = 0;
                 object.afterReadDuration = 0;
+                object.isSpoiler = false;
                 object.memberLabel = null;
                 object.isQuestion = false;
                 object.statusSourceType = options.enums === String ? "IMAGE" : 0;
@@ -31788,6 +31809,8 @@ $root.proto = (function() {
                 object.rankingVersion = message.rankingVersion;
             if (message.afterReadDuration != null && message.hasOwnProperty("afterReadDuration"))
                 object.afterReadDuration = message.afterReadDuration;
+            if (message.isSpoiler != null && message.hasOwnProperty("isSpoiler"))
+                object.isSpoiler = message.isSpoiler;
             if (message.memberLabel != null && message.hasOwnProperty("memberLabel"))
                 object.memberLabel = $root.proto.MemberLabel.toObject(message.memberLabel, options);
             if (message.isQuestion != null && message.hasOwnProperty("isQuestion"))
@@ -52457,6 +52480,7 @@ $root.proto = (function() {
          * @property {proto.Message.IOrderMessage|null} [orderMessage] Message orderMessage
          * @property {proto.Message.IListResponseMessage|null} [listResponseMessage] Message listResponseMessage
          * @property {proto.Message.IFutureProofMessage|null} [ephemeralMessage] Message ephemeralMessage
+         * @property {proto.Message.IFutureProofMessage|null} [spoilerMessage] Message spoilerMessage
          * @property {proto.Message.IInvoiceMessage|null} [invoiceMessage] Message invoiceMessage
          * @property {proto.Message.IButtonsMessage|null} [buttonsMessage] Message buttonsMessage
          * @property {proto.Message.IButtonsResponseMessage|null} [buttonsResponseMessage] Message buttonsResponseMessage
@@ -52785,6 +52809,14 @@ $root.proto = (function() {
          * @instance
          */
         Message.prototype.ephemeralMessage = null;
+
+        /**
+         * Message spoilerMessage.
+         * @member {proto.Message.IFutureProofMessage|null|undefined} spoilerMessage
+         * @memberof proto.Message
+         * @instance
+         */
+        Message.prototype.spoilerMessage = null;
 
         /**
          * Message invoiceMessage.
@@ -53322,6 +53354,8 @@ $root.proto = (function() {
                 $root.proto.Message.ListResponseMessage.encode(message.listResponseMessage, writer.uint32(/* id 39, wireType 2 =*/314).fork()).ldelim();
             if (message.ephemeralMessage != null && Object.hasOwnProperty.call(message, "ephemeralMessage"))
                 $root.proto.Message.FutureProofMessage.encode(message.ephemeralMessage, writer.uint32(/* id 40, wireType 2 =*/322).fork()).ldelim();
+            if (message.spoilerMessage != null && Object.hasOwnProperty.call(message, "spoilerMessage"))
+                $root.proto.Message.FutureProofMessage.encode(message.spoilerMessage, writer.uint32(/* id 118, wireType 2 =*/946).fork()).ldelim();
             if (message.invoiceMessage != null && Object.hasOwnProperty.call(message, "invoiceMessage"))
                 $root.proto.Message.InvoiceMessage.encode(message.invoiceMessage, writer.uint32(/* id 41, wireType 2 =*/330).fork()).ldelim();
             if (message.buttonsMessage != null && Object.hasOwnProperty.call(message, "buttonsMessage"))
@@ -53600,6 +53634,10 @@ $root.proto = (function() {
                     }
                 case 40: {
                         message.ephemeralMessage = $root.proto.Message.FutureProofMessage.decode(reader, reader.uint32(), undefined, long + 1);
+                        break;
+                    }
+                case 118: {
+                        message.spoilerMessage = $root.proto.Message.FutureProofMessage.decode(reader, reader.uint32(), undefined, long + 1);
                         break;
                     }
                 case 41: {
@@ -54022,6 +54060,11 @@ $root.proto = (function() {
                 var error = $root.proto.Message.FutureProofMessage.verify(message.ephemeralMessage, long + 1);
                 if (error)
                     return "ephemeralMessage." + error;
+            }
+            if (message.spoilerMessage != null && message.hasOwnProperty("spoilerMessage")) {
+                var error = $root.proto.Message.FutureProofMessage.verify(message.spoilerMessage, long + 1);
+                if (error)
+                    return "spoilerMessage." + error;
             }
             if (message.invoiceMessage != null && message.hasOwnProperty("invoiceMessage")) {
                 var error = $root.proto.Message.InvoiceMessage.verify(message.invoiceMessage, long + 1);
@@ -54479,6 +54522,11 @@ $root.proto = (function() {
                     throw TypeError(".proto.Message.ephemeralMessage: object expected");
                 message.ephemeralMessage = $root.proto.Message.FutureProofMessage.fromObject(object.ephemeralMessage, long + 1);
             }
+            if (object.spoilerMessage != null) {
+                if (typeof object.spoilerMessage !== "object")
+                    throw TypeError(".proto.Message.spoilerMessage: object expected");
+                message.spoilerMessage = $root.proto.Message.FutureProofMessage.fromObject(object.spoilerMessage, long + 1);
+            }
             if (object.invoiceMessage != null) {
                 if (typeof object.invoiceMessage !== "object")
                     throw TypeError(".proto.Message.invoiceMessage: object expected");
@@ -54808,6 +54856,7 @@ $root.proto = (function() {
                 object.orderMessage = null;
                 object.listResponseMessage = null;
                 object.ephemeralMessage = null;
+                object.spoilerMessage = null;
                 object.invoiceMessage = null;
                 object.buttonsMessage = null;
                 object.buttonsResponseMessage = null;
@@ -54929,6 +54978,8 @@ $root.proto = (function() {
                 object.listResponseMessage = $root.proto.Message.ListResponseMessage.toObject(message.listResponseMessage, options);
             if (message.ephemeralMessage != null && message.hasOwnProperty("ephemeralMessage"))
                 object.ephemeralMessage = $root.proto.Message.FutureProofMessage.toObject(message.ephemeralMessage, options);
+            if (message.spoilerMessage != null && message.hasOwnProperty("spoilerMessage"))
+                object.spoilerMessage = $root.proto.Message.FutureProofMessage.toObject(message.spoilerMessage, options);
             if (message.invoiceMessage != null && message.hasOwnProperty("invoiceMessage"))
                 object.invoiceMessage = $root.proto.Message.InvoiceMessage.toObject(message.invoiceMessage, options);
             if (message.buttonsMessage != null && message.hasOwnProperty("buttonsMessage"))

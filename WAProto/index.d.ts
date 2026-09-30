@@ -10878,6 +10878,9 @@ export namespace proto {
         /** ContextInfo afterReadDuration */
         afterReadDuration?: (number|null);
 
+        /** ContextInfo isSpoiler */
+        isSpoiler?: (boolean|null);
+
         /** ContextInfo memberLabel */
         memberLabel?: (proto.IMemberLabel|null);
 
@@ -11037,6 +11040,9 @@ export namespace proto {
 
         /** ContextInfo afterReadDuration. */
         public afterReadDuration: number;
+
+        /** ContextInfo isSpoiler. */
+        public isSpoiler: boolean;
 
         /** ContextInfo memberLabel. */
         public memberLabel?: (proto.IMemberLabel|null);
@@ -18471,6 +18477,9 @@ export namespace proto {
         /** Message ephemeralMessage */
         ephemeralMessage?: (proto.Message.IFutureProofMessage|null);
 
+        /** Message spoilerMessage */
+        spoilerMessage?: (proto.Message.IFutureProofMessage|null);
+
         /** Message invoiceMessage */
         invoiceMessage?: (proto.Message.IInvoiceMessage|null);
 
@@ -18744,6 +18753,9 @@ export namespace proto {
 
         /** Message ephemeralMessage. */
         public ephemeralMessage?: (proto.Message.IFutureProofMessage|null);
+
+        /** Message spoilerMessage. */
+        public spoilerMessage?: (proto.Message.IFutureProofMessage|null);
 
         /** Message invoiceMessage. */
         public invoiceMessage?: (proto.Message.IInvoiceMessage|null);

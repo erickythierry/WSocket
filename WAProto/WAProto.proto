@@ -1054,6 +1054,7 @@ message ContextInfo {
     optional PairedMediaType pairedMediaType = 59;
     optional uint32 rankingVersion = 60;
     optional uint32 afterReadDuration = 76;
+    optional bool isSpoiler = 73;
     optional MemberLabel memberLabel = 62;
     optional bool isQuestion = 63;
     optional StatusSourceType statusSourceType = 64;
@@ -1721,6 +1722,7 @@ message Message {
     optional OrderMessage orderMessage = 38;
     optional ListResponseMessage listResponseMessage = 39;
     optional FutureProofMessage ephemeralMessage = 40;
+    optional FutureProofMessage spoilerMessage = 118;
     optional InvoiceMessage invoiceMessage = 41;
     optional ButtonsMessage buttonsMessage = 42;
     optional ButtonsResponseMessage buttonsResponseMessage = 43;
