@@ -42,6 +42,8 @@ import {
 } from '../WABinary'
 import { WebSocketClient } from './Client'
 
+const OFFLINE_FLUSH_TIMEOUT_MS = 20_000
+
 /**
  * Connects to WA servers and performs:
  * - simple queries (no retry mechanism, wait for connection establishment)
@@ -104,6 +106,7 @@ export const makeSocket = (config: SocketConfig) => {
 	let epoch = 1
 	let keepAliveReq: NodeJS.Timeout
 	let qrTimer: NodeJS.Timeout
+	let offlineTimer: NodeJS.Timeout
 	let closed = false
 
 	const uqTagId = generateMdTagPrefix()
@@ -343,6 +346,7 @@ export const makeSocket = (config: SocketConfig) => {
 
 		clearInterval(keepAliveReq)
 		clearTimeout(qrTimer)
+		clearTimeout(offlineTimer)
 
 		ws.removeAllListeners('close')
 		ws.removeAllListeners('open')
@@ -637,6 +641,14 @@ export const makeSocket = (config: SocketConfig) => {
 		ev.emit('creds.update', { me: { ...authState.creds.me!, lid: node.attrs.lid } })
 
 		ev.emit('connection.update', { connection: 'open' })
+
+		// o WhatsApp às vezes manda o offline_preview e nunca o fim do lote; sem isto o buffer fica aberto e a sessão "conectada" não processa nada
+		if (!offlineFinished) {
+			offlineTimer = setTimeout(() => {
+				logger.warn(`fim do lote offline não chegou em ${OFFLINE_FLUSH_TIMEOUT_MS}ms, liberando o buffer`)
+				finishOffline()
+			}, OFFLINE_FLUSH_TIMEOUT_MS)
+		}
 	})
 
 	ws.on('CB:stream:error', (node: BinaryNode) => {
@@ -675,6 +687,22 @@ export const makeSocket = (config: SocketConfig) => {
 	})
 
 	let didStartBuffer = false
+	let offlineFinished = false
+	const finishOffline = () => {
+		clearTimeout(offlineTimer)
+		if (offlineFinished) {
+			return
+		}
+
+		offlineFinished = true
+		if (didStartBuffer) {
+			ev.flush()
+			logger.trace('flushed events for initial buffer')
+		}
+
+		ev.emit('connection.update', { receivedPendingNotifications: true })
+	}
+
 	process.nextTick(() => {
 		if (creds.me?.id) {
 			// start buffering important events
@@ -692,12 +720,7 @@ export const makeSocket = (config: SocketConfig) => {
 		const offlineNotifs = +(child?.attrs.count || 0)
 
 		logger.info(`handled ${offlineNotifs} offline messages/notifications`)
-		if (didStartBuffer) {
-			ev.flush()
-			logger.trace('flushed events for initial buffer')
-		}
-
-		ev.emit('connection.update', { receivedPendingNotifications: true })
+		finishOffline()
 	})
 
 	// update credentials when required
