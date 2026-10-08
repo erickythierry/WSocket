@@ -143,6 +143,12 @@ export class SenderKeyState {
 		return null
 	}
 
+	public clearSenderMessageKeys(): void {
+		if (this.senderKeyStateStructure.senderMessageKeys.length) {
+			this.senderKeyStateStructure.senderMessageKeys = []
+		}
+	}
+
 	public getStructure(): SenderKeyStateStructure {
 		return this.senderKeyStateStructure
 	}

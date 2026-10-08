@@ -41,7 +41,7 @@ import {
 import { buildTcTokenFromJid } from '../Utils/tc-token-utils'
 import { handleNctSaltMutation, NCT_SALT_SYNC_INDEX } from '../Utils/cs-token-utils'
 import caches from '../Utils/cache-utils'
-import { makeMutex } from '../Utils/make-mutex'
+import { makeKeyedMutex, makeMutex } from '../Utils/make-mutex'
 import processMessage from '../Utils/process-message'
 import {
 	BinaryNode,
@@ -73,18 +73,33 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	let privacySettings: { [_: string]: string } | undefined
 	let needToFlushWithAppStateSync = false
 	let pendingAppStateSync = false
-	/** this mutex ensures that the notifications (receipts, messages etc.) are processed in order */
-	const processingMutex = makeMutex()
+	// um mutex por tipo: antes um só segurava decrypt, recibo, notificação, retry e app-state da sessão inteira.
+	// Mensagem segura o autor e o chat: a ordem por autor põe o SKDM (stanza 1:1 do autor) antes do skmsg dele
+	// no grupo, e a por chat vale para o consumidor. Chats e autores diferentes decifram em paralelo.
+	// Sempre autor antes de chat: ninguém espera autor segurando chat, então não há ciclo; e o autor pego
+	// primeiro mantém a ordem de chegada do SKDM mesmo com o chat do PV ocupado.
+	const chatMutex = makeKeyedMutex()
+	const authorMutex = makeKeyedMutex()
+	const messageMutex = {
+		mutex<T>(chat: string, author: string, task: () => Promise<T> | T): Promise<T> {
+			return authorMutex.mutex(author, () => chatMutex.mutex(chat, task))
+		}
+	}
+	const receiptMutex = makeMutex()
+	const notificationMutex = makeMutex()
+	/** todo resync e patch de app-state em série: duas bases diferentes gravando a versão quebram o LTHash */
+	const appStatePatchMutex = makeMutex()
 
-	const placeholderResendCache: CacheStore =
-		config.placeholderResendCache ||
-		new NodeCache<any>({
+	let placeholderResendCache: CacheStore
+	if (config.placeholderResendCache) {
+		placeholderResendCache = config.placeholderResendCache
+	} else {
+		const cache = new NodeCache<any>({
 			stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
 			useClones: false
 		})
-
-	if (!config.placeholderResendCache) {
-		config.placeholderResendCache = placeholderResendCache
+		sock.onSocketEnd(() => cache.close())
+		placeholderResendCache = cache
 	}
 
 	/** helper function to fetch the given app state sync key */
@@ -775,7 +790,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		let initial: LTHashState
 		let encodeResult: { patch: proto.ISyncdPatch; state: LTHashState }
 
-		await processingMutex.mutex(async () => {
+		await appStatePatchMutex.mutex(async () => {
 			await authState.keys.transaction(async () => {
 				logger.debug({ patch: patchCreate }, 'applying app patch')
 
@@ -865,10 +880,10 @@ export const makeChatsSocket = (config: SocketConfig) => {
 
 		let props: { [_: string]: string } = {}
 		if (propsNode) {
-			if (propsNode.attrs?.hash) {
-				// on some clients, the hash is returning as undefined
-				authState.creds.lastPropHash = propsNode?.attrs?.hash
-				ev.emit('creds.update', authState.creds)
+			// on some clients, the hash is returning as undefined
+			if (propsNode.attrs?.hash && propsNode.attrs.hash !== authState.creds.lastPropHash) {
+				authState.creds.lastPropHash = propsNode.attrs.hash
+				ev.emit('creds.update', { lastPropHash: propsNode.attrs.hash })
 			}
 
 			props = reduceBinaryNodeToDictionary(propsNode, 'prop')
@@ -1005,7 +1020,8 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	 * help ensure parity with WA Web
 	 * */
 	const executeInitQueries = async () => {
-		await Promise.all([fetchProps(), fetchBlocklist(), fetchPrivacySettings()])
+		// blocklist fica de fora: o bot descarta e conta com muitos bloqueios demora a responder
+		await Promise.all([fetchProps(), fetchPrivacySettings()])
 	}
 
 	const upsertMessage = ev.createBufferedFunction(async (msg: WAMessage, type: MessageUpsertType) => {
@@ -1059,21 +1075,26 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		}
 
 		async function doAppStateSync() {
-			if (!authState.creds.accountSyncCounter) {
-				logger.info('doing initial app state sync')
-				const result = await resyncAppState(ALL_WA_PATCH_NAMES, true)
-				if (result?.failedCollections.length) {
-					logger.warn(
-						{ collections: result.failedCollections },
-						'app state sync inicial incompleto; contador não será avançado'
-					)
-					return
+			try {
+				if (!authState.creds.accountSyncCounter) {
+					logger.info('doing initial app state sync')
+					const result = await appStatePatchMutex.mutex(() => resyncAppState(ALL_WA_PATCH_NAMES, true))
+					if (result?.failedCollections.length) {
+						logger.warn(
+							{ collections: result.failedCollections },
+							'app state sync inicial incompleto; contador não será avançado'
+						)
+						return
+					}
+
+					const accountSyncCounter = (authState.creds.accountSyncCounter || 0) + 1
+					ev.emit('creds.update', { accountSyncCounter })
 				}
-
-				const accountSyncCounter = (authState.creds.accountSyncCounter || 0) + 1
-				ev.emit('creds.update', { accountSyncCounter })
-
+			} finally {
+				// o buffer aberto à espera da chave de app-state fecha mesmo com contador > 0 ou sync que falhou;
+				// antes ficava aberto para sempre e a sessão "conectada" não entregava mensagem nenhuma
 				if (needToFlushWithAppStateSync) {
+					needToFlushWithAppStateSync = false
 					logger.debug('flushing with app state sync')
 					ev.flush()
 				}
@@ -1133,7 +1154,11 @@ export const makeChatsSocket = (config: SocketConfig) => {
 	return {
 		...sock,
 		getBotListV2,
-		processingMutex,
+		messageMutex,
+		receiptMutex,
+		notificationMutex,
+		appStatePatchMutex,
+		placeholderResendCache,
 		fetchPrivacySettings,
 		upsertMessage,
 		appPatch,

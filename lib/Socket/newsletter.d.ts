@@ -59,9 +59,19 @@ export declare const makeNewsletterSocket: (config: SocketConfig) => {
         [_: string]: import("../Types").GroupMetadata;
     }>;
     getBotListV2: () => Promise<import("../Types").BotListInfo[]>;
-    processingMutex: {
+    messageMutex: {
+        mutex<T>(chat: string, author: string, task: () => Promise<T> | T): Promise<T>;
+    };
+    receiptMutex: {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
     };
+    notificationMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    appStatePatchMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    placeholderResendCache: import("../Types").CacheStore;
     fetchPrivacySettings: (force?: boolean) => Promise<{
         [_: string]: string;
     }>;
@@ -137,6 +147,7 @@ export declare const makeNewsletterSocket: (config: SocketConfig) => {
     logout: (msg?: string) => Promise<void>;
     end: (error: Error | undefined) => void;
     onUnexpectedError: (err: Error | import("@hapi/boom").Boom, msg: string) => void;
+    onSocketEnd: (handler: () => void) => void;
     uploadPreKeys: (count?: number) => Promise<void>;
     uploadPreKeysToServerIfRequired: () => Promise<void>;
     requestPairingCode: (phoneNumber: string, customPairingCode?: string) => Promise<string>;

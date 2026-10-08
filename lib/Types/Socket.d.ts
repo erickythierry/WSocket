@@ -4,6 +4,7 @@ import type { URL } from 'url';
 import { proto } from '../../WAProto';
 import { ILogger } from '../Utils/logger';
 import { AuthenticationState, SignalAuthState, TransactionCapabilityOptions } from './Auth';
+import { BaileysEvent } from './Events';
 import { GroupMetadata } from './GroupMetadata';
 import { MediaConnInfo } from './Message';
 import { SignalRepository } from './Signal';
@@ -12,8 +13,8 @@ export type WABrowserDescription = [string, string, string];
 export type CacheStore = {
     /** get a cached key and change the stats */
     get<T>(key: string): T | undefined;
-    /** set a key in the cache */
-    set<T>(key: string, value: T): void;
+    /** set a key in the cache; ttl in seconds overrides the default */
+    set<T>(key: string, value: T, ttl?: number): void;
     /** delete a key from the cache */
     del(key: string): void;
     /** flush all data */
@@ -98,6 +99,18 @@ export type SocketConfig = {
      * Messages from that jid will also not be decrypted
      * */
     shouldIgnoreJid: (jid: string) => boolean | undefined;
+    /**
+     * Recibo que não é retry recebe só o ack, sem mutex, buffer nem evento.
+     * Para quem não consome message-receipt.update nem messages.update de status.
+     */
+    skipReceiptEvents?: boolean;
+    /** eventos descartados na emissão, antes de buffer e consolidação */
+    ignoredEvents?: BaileysEvent[];
+    /**
+     * Em `ib dirty groups` só limpa o dirty bit, sem baixar a metadata de todos os grupos da conta.
+     * Para quem já invalida o próprio cache de grupo por evento.
+     */
+    skipGroupsDirtyFetch?: boolean;
     /**
      * Optionally patch the message before sending out
      * */

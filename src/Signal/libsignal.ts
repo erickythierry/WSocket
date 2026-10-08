@@ -1,7 +1,7 @@
 import * as libsignal from 'libsignal'
 import { SignalAuthState } from '../Types'
 import { SignalRepository } from '../Types/Signal'
-import { generateSignalPubKey } from '../Utils'
+import { BufferJSON, generateSignalPubKey } from '../Utils'
 import { isLidUser, jidDecode } from '../WABinary'
 import type { SenderKeyStore } from './Group/group_cipher'
 import { SenderKeyName } from './Group/sender-key-name'
@@ -191,8 +191,10 @@ function signalStorage({ creds, keys }: SignalAuthState): SenderKeyStore & Recor
 		},
 		storeSenderKey: async (senderKeyName: SenderKeyName, key: SenderKeyRecord) => {
 			const keyId = senderKeyName.toString()
-			const serialized = JSON.stringify(key.serialize())
-			await keys.set({ 'sender-key': { [keyId]: Buffer.from(serialized, 'utf-8') } })
+			// seeds em base64 e o JSON como string: o array de inteiros dentro de um Buffer custava 2,3x o tamanho.
+			// O deserialize aceita os formatos antigos, então a linha antiga converte no próximo write.
+			const serialized = JSON.stringify(key.serialize(), BufferJSON.replacer)
+			await keys.set({ 'sender-key': { [keyId]: serialized } })
 		},
 		getOurRegistrationId: () => creds.registrationId,
 		getOurIdentity: () => {

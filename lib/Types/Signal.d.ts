@@ -40,7 +40,8 @@ type E2ESession = {
     registrationId: number;
     identityKey: Uint8Array;
     signedPreKey: SignedPreKey;
-    preKey: PreKey;
+    /** o bundle do retry receipt pode vir sem one-time prekey */
+    preKey?: PreKey;
 };
 type E2ESessionOpts = {
     jid: string;

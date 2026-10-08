@@ -240,21 +240,14 @@ export type MessageRelayOptions = MinimalRelayOptions & {
     newsletterMediaId?: string;
     isretry?: boolean;
     /**
-     * POC exclude-relay: usuários (phone ou lid) cujos devices NÃO devem entrar no <participants> de um envio de grupo.
-     * Todos os devices desses usuários são removidos antes de gerar a sender-key => eles não decifram o skmsg.
-     * Resolve phone<->lid via metadados do grupo. Usar apenas para estudo/deteccao.
-     */
-    excludeJids?: string[];
-    /**
-     * POC exclude-relay (inverso de excludeJids): whitelist. Somente os usuários (phone ou lid) nesta lista
-     * — mais o próprio remetente — mantêm seus devices no <participants>; todos os demais são removidos e
-     * veem o stub. Se `includeJids` estiver setado, tem precedência sobre `excludeJids`. Resolve phone<->lid
-     * via metadados do grupo. Usar apenas para estudo/deteccao.
+     * Relay seletivo (sussurro): somente os usuários (phone ou lid) nesta lista — mais o próprio remetente —
+     * mantêm seus devices no <participants>; todos os demais são removidos e veem o stub. Resolve phone<->lid
+     * via metadados do grupo.
      */
     includeJids?: string[];
     /**
-     * Controla decrypt-fail="hide" no enc/skmsg de grupo. Em relays seletivos com includeJids ou
-     * excludeJids, o padrão é true; informe false para exibir o placeholder de falha nos excluídos.
+     * Controla decrypt-fail="hide" no enc/skmsg de grupo. Em relays seletivos com includeJids o padrão é
+     * true; informe false para exibir o placeholder de falha nos excluídos.
      * Não altera o roteamento nem a criptografia.
      */
     decryptFailHide?: boolean;
@@ -276,9 +269,7 @@ export type MiscMessageGenerationOptions = MinimalRelayOptions & {
     font?: number;
     /** if it is broadcast */
     broadcast?: boolean;
-    /** POC exclude-relay: repassado ao relayMessage; ver MessageRelayOptions.excludeJids */
-    excludeJids?: string[];
-    /** POC exclude-relay (inverso): repassado ao relayMessage; ver MessageRelayOptions.includeJids */
+    /** relay seletivo: repassado ao relayMessage; ver MessageRelayOptions.includeJids */
     includeJids?: string[];
     /** Repassado ao relayMessage; ver MessageRelayOptions.decryptFailHide */
     decryptFailHide?: boolean;
@@ -287,26 +278,6 @@ export type MiscMessageGenerationOptions = MinimalRelayOptions & {
 export type StatusMessageOptions = Omit<MiscMessageGenerationOptions, 'statusJidList' | 'broadcast'> & {
     /** Contatos que poderão descriptografar e visualizar o status. */
     statusJidList: string[];
-};
-/**
- * Opções para sendSecretGroupMessage (mensagem em grupo enviada apenas para o participante targetJid).
- * Deve ser usado apenas em grupos.
- */
-export type SecretGroupMessageOptions = MiscMessageGenerationOptions & {
-    /** JID do participante que receberá a mensagem (ex.: 5511999999999@s.whatsapp.net ou lid) */
-    targetJid: string;
-    /** Se true, apenas o device 0 (smartphone) do targetJid recebe a mensagem; demais devices do target não recebem. Default: false */
-    targetOnly0Device?: boolean;
-    /** usar cache de devices; default true */
-    useUserDevicesCache?: boolean;
-    /** usar cache de metadados do grupo; default true */
-    useCachedGroupMetadata?: boolean;
-    /** atributos extras no nó WA */
-    additionalAttributes?: {
-        [_: string]: string;
-    };
-    /** nós extras no envelope da mensagem */
-    additionalNodes?: BinaryNode[];
 };
 export type MessageGenerationOptionsFromContent = MiscMessageGenerationOptions & {
     userJid: string;

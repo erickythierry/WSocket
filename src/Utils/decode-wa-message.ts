@@ -289,7 +289,7 @@ export const decryptMessageNode = (
 									item: msg.senderKeyDistributionMessage
 								})
 							} catch (err) {
-								logger.error({ key: fullMessage.key, err }, 'failed to decrypt message')
+								logger.error({ key: fullMessage.key, err }, 'failed to process sender key distribution message')
 							}
 						}
 

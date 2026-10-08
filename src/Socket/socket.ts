@@ -67,7 +67,7 @@ export const makeSocket = (config: SocketConfig) => {
 	} = config
 
 	if (printQRInTerminal) {
-		console.warn(
+		logger.warn(
 			'⚠️ The printQRInTerminal option has been deprecated. You will no longer receive QR codes in the terminal automatically. Please listen to the connection.update event yourself and handle the QR your way. You can remove this message by removing this opttion. This message will be removed in a future version.'
 		)
 	}
@@ -78,7 +78,8 @@ export const makeSocket = (config: SocketConfig) => {
 		throw new Boom('Mobile API is not supported anymore', { statusCode: DisconnectReason.loggedOut })
 	}
 
-	if ((url.protocol === 'wss' || url.protocol === 'ws') && authState?.creds?.routingInfo) {
+	// URL.protocol vem com dois-pontos; sem eles o ED nunca era anexado
+	if ((url.protocol === 'wss:' || url.protocol === 'ws:') && authState?.creds?.routingInfo) {
 		url.searchParams.append('ED', authState.creds.routingInfo.toString('base64url'))
 	}
 
@@ -86,7 +87,7 @@ export const makeSocket = (config: SocketConfig) => {
 
 	ws.connect()
 
-	const ev = makeEventBuffer(logger)
+	const ev = makeEventBuffer(logger, config.ignoredEvents)
 	/** ephemeral key pair used to encrypt/decrypt communication. Unique for each connection */
 	const ephemeralKeyPair = Curve.generateKeyPair()
 	/** WA noise protocol wrapper */
@@ -108,6 +109,11 @@ export const makeSocket = (config: SocketConfig) => {
 	let qrTimer: NodeJS.Timeout
 	let offlineTimer: NodeJS.Timeout
 	let closed = false
+	/** fecham o que cada camada criou (caches com timer) quando o socket termina */
+	const socketEndHandlers: (() => void)[] = []
+	const onSocketEnd = (handler: () => void) => {
+		socketEndHandlers.push(handler)
+	}
 
 	const uqTagId = generateMdTagPrefix()
 	const generateMessageTag = () => `${uqTagId}${epoch++}`
@@ -192,7 +198,7 @@ export const makeSocket = (config: SocketConfig) => {
 
 				ws.on(`TAG:${msgId}`, onRecv)
 				ws.on('close', onErr) // if the socket closes, you'll never receive the message
-				ws.off('error', onErr)
+				ws.on('error', onErr)
 			})
 
 			return result as any
@@ -227,7 +233,7 @@ export const makeSocket = (config: SocketConfig) => {
 		}
 		helloMsg = proto.HandshakeMessage.fromObject(helloMsg)
 
-		logger.info({ browser, helloMsg }, 'connected to WA')
+		logger.debug({ browser, helloMsg }, 'connected to WA')
 
 		const init = proto.HandshakeMessage.encode(helloMsg).finish()
 
@@ -241,10 +247,10 @@ export const makeSocket = (config: SocketConfig) => {
 		let node: proto.IClientPayload
 		if (!creds.me) {
 			node = generateRegistrationNode(creds, config)
-			logger.info({ node }, 'not logged in, attempting registration...')
+			logger.debug({ node }, 'not logged in, attempting registration...')
 		} else {
 			node = generateLoginNode(creds.me.id, config)
-			logger.info({ node }, 'logging in...')
+			logger.debug({ node }, 'logging in...')
 		}
 
 		const payloadEnc = noise.encrypt(proto.ClientPayload.encode(node).finish())
@@ -275,17 +281,31 @@ export const makeSocket = (config: SocketConfig) => {
 		return +countChild!.attrs.value
 	}
 
+	let uploadPreKeysPromise: Promise<void> | undefined
 	/** generates and uploads a set of pre-keys to the server */
 	const uploadPreKeys = async (count = INITIAL_PREKEY_COUNT) => {
-		await keys.transaction(async () => {
-			logger.info({ count }, 'uploading pre-keys')
-			const { update, node } = await getNextPreKeysNode({ creds, keys }, count)
+		// uma por vez: duas chamadas (CB:success e notificação encrypt) geravam o mesmo intervalo de ids
+		if (uploadPreKeysPromise) {
+			logger.debug('pre-key upload already in progress')
+			return uploadPreKeysPromise
+		}
 
-			await query(node)
+		uploadPreKeysPromise = (async () => {
+			logger.info({ count }, 'uploading pre-keys')
+			// grava direto no store, fora da transação: a privada fica persistida antes de a pública chegar ao servidor
+			const { update, node } = await getNextPreKeysNode({ creds, keys: authState.keys }, count)
 			ev.emit('creds.update', update)
 
+			await query(node)
+
 			logger.info({ count }, 'uploaded pre-keys')
-		})
+		})()
+
+		try {
+			await uploadPreKeysPromise
+		} finally {
+			uploadPreKeysPromise = undefined
+		}
 	}
 
 	const uploadPreKeysToServerIfRequired = async () => {
@@ -344,10 +364,12 @@ export const makeSocket = (config: SocketConfig) => {
 		closed = true
 		logger.info({ trace: error?.stack }, error ? 'connection errored' : 'connection closed')
 
-		clearInterval(keepAliveReq)
+		clearTimeout(keepAliveReq)
 		clearTimeout(qrTimer)
 		clearTimeout(offlineTimer)
 
+		// queries em voo terminam agora com Connection Closed, em vez de esperar o timeout de cada uma
+		ws.emit('close', new Boom('Connection Closed', { statusCode: DisconnectReason.connectionClosed }))
 		ws.removeAllListeners('close')
 		ws.removeAllListeners('open')
 		ws.removeAllListeners('message')
@@ -356,6 +378,17 @@ export const makeSocket = (config: SocketConfig) => {
 			try {
 				ws.close()
 			} catch {}
+		}
+
+		// mensagem já ackada e ainda no buffer chega ao consumidor antes do close; o servidor não reenvia
+		ev.flush(true)
+
+		for (const handler of socketEndHandlers.splice(0)) {
+			try {
+				handler()
+			} catch (err) {
+				logger.warn({ err }, 'erro ao liberar recurso do socket')
+			}
 		}
 
 		ev.emit('connection.update', {
@@ -392,18 +425,30 @@ export const makeSocket = (config: SocketConfig) => {
 		})
 	}
 
-	const startKeepAliveRequest = () =>
-		(keepAliveReq = setInterval(() => {
+	const startKeepAliveRequest = () => {
+		let lastTick = Date.now()
+		const tick = () => {
+			if (closed) {
+				return
+			}
+
+			const now = Date.now()
+			// o loop ficou parado (GC, CPU): os timers rodam antes do I/O, então lastDateRecv está velho com
+			// dados esperando no socket. Pular a checagem deste ciclo evita derrubar todas as sessões juntas.
+			const loopStalled = now - lastTick > keepAliveIntervalMs * 1.5
+			lastTick = now
+			keepAliveReq = setTimeout(tick, keepAliveIntervalMs)
+
 			if (!lastDateRecv) {
 				lastDateRecv = new Date()
 			}
 
-			const diff = Date.now() - lastDateRecv.getTime()
+			const diff = now - lastDateRecv.getTime()
 			/*
 				check if it's been a suspicious amount of time since the server responded with our last seen
 				it could be that the network is down
 			*/
-			if (diff > keepAliveIntervalMs + 5000) {
+			if (diff > keepAliveIntervalMs + 5000 && !loopStalled) {
 				end(new Boom('Connection was lost', { statusCode: DisconnectReason.connectionLost }))
 			} else if (ws.isOpen) {
 				// if its all good, send a keep alive request
@@ -422,7 +467,14 @@ export const makeSocket = (config: SocketConfig) => {
 			} else {
 				logger.warn('keep alive called when WS not open')
 			}
-		}, keepAliveIntervalMs))
+		}
+
+		// jitter no primeiro tick: sessões criadas juntas não checam todas no mesmo instante
+		const firstDelay = keepAliveIntervalMs * (0.5 + Math.random() * 0.5)
+		lastTick = Date.now() - (keepAliveIntervalMs - firstDelay)
+		keepAliveReq = setTimeout(tick, firstDelay)
+	}
+
 	/** i have no idea why this exists. pls enlighten me */
 	const sendPassiveIq = (tag: 'passive' | 'active') =>
 		query({
@@ -632,8 +684,13 @@ export const makeSocket = (config: SocketConfig) => {
 	})
 	// login complete
 	ws.on('CB:success', async (node: BinaryNode) => {
-		await uploadPreKeysToServerIfRequired()
-		await sendPassiveIq('active')
+		// falha aqui não pode impedir o 'open': o socket ficava aberto e o consumidor nunca via a conexão
+		try {
+			await uploadPreKeysToServerIfRequired()
+			await sendPassiveIq('active')
+		} catch (err) {
+			logger.warn({ err }, 'falha ao subir pre-keys ou enviar passive iq no login')
+		}
 
 		logger.info('opened connection to WA')
 		clearTimeout(qrTimer) // will never happen in all likelyhood -- but just in case WA sends success on first try
@@ -681,8 +738,11 @@ export const makeSocket = (config: SocketConfig) => {
 		const edgeRoutingNode = getBinaryNodeChild(node, 'edge_routing')
 		const routingInfo = getBinaryNodeChild(edgeRoutingNode, 'routing_info')
 		if (routingInfo?.content) {
-			authState.creds.routingInfo = Buffer.from(routingInfo?.content as Uint8Array)
-			ev.emit('creds.update', authState.creds)
+			const next = Buffer.from(routingInfo.content as Uint8Array)
+			if (!authState.creds.routingInfo || !next.equals(authState.creds.routingInfo)) {
+				authState.creds.routingInfo = next
+				ev.emit('creds.update', { routingInfo: next })
+			}
 		}
 	})
 
@@ -727,11 +787,11 @@ export const makeSocket = (config: SocketConfig) => {
 	ev.on('creds.update', update => {
 		const name = update.me?.name
 		// if name has just been received
-		if (creds.me?.name !== name) {
+		if (name && creds.me?.name !== name) {
 			logger.debug({ name }, 'updated pushName')
 			sendNode({
 				tag: 'presence',
-				attrs: { name: name! }
+				attrs: { name }
 			}).catch(err => {
 				logger.warn({ trace: err.stack }, 'error in sending presence update on name change')
 			})
@@ -758,6 +818,7 @@ export const makeSocket = (config: SocketConfig) => {
 		logout,
 		end,
 		onUnexpectedError,
+		onSocketEnd,
 		uploadPreKeys,
 		uploadPreKeysToServerIfRequired,
 		requestPairingCode,

@@ -398,10 +398,12 @@ export const encryptedStream = async (
 	const sha256Plain = Crypto.createHash('sha256')
 	const sha256Enc = Crypto.createHash('sha256')
 
-	const onChunk = (buff: Buffer) => {
+	const onChunk = async (buff: Buffer) => {
 		sha256Enc.update(buff)
 		hmac.update(buff)
-		encFileWriteStream.write(buff)
+		if (!encFileWriteStream.write(buff)) {
+			await once(encFileWriteStream, 'drain')
+		}
 	}
 
 	try {
@@ -421,10 +423,10 @@ export const encryptedStream = async (
 			}
 
 			sha256Plain.update(data)
-			onChunk(aes.update(data))
+			await onChunk(aes.update(data))
 		}
 
-		onChunk(aes.final())
+		await onChunk(aes.final())
 
 		const mac = hmac.digest().slice(0, 10)
 		sha256Enc.update(mac)
@@ -686,7 +688,7 @@ export const getWAUploadToServer = (
 					result = error.response?.data
 				}
 
-				const isLast = hostname === hosts[uploadInfo.hosts.length - 1]?.hostname
+				const isLast = hostname === hosts[hosts.length - 1]?.hostname
 				logger.warn(
 					{ trace: error.stack, uploadResult: result },
 					`Error in uploading to ${hostname} ${isLast ? '' : ', retrying...'}`

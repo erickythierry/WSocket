@@ -16,6 +16,7 @@ import {
 } from '../Types'
 import { BinaryNode, getBinaryNodeChild, getBinaryNodeChildren, getBinaryNodeChildString } from '../WABinary'
 import { generateMessageIDV2 } from './generics'
+import { ILogger } from './logger'
 import { getStream, getUrlFromDirectPath } from './messages-media'
 
 export const parseCatalogNode = (node: BinaryNode) => {
@@ -214,12 +215,13 @@ export const parseProductNode = (productNode: BinaryNode) => {
 export async function uploadingNecessaryImagesOfProduct<T extends ProductUpdate | ProductCreate>(
 	product: T,
 	waUploadToServer: WAMediaUploadFunction,
-	timeoutMs = 30_000
+	timeoutMs = 30_000,
+	logger?: ILogger
 ) {
 	product = {
 		...product,
 		images: product.images
-			? await uploadingNecessaryImages(product.images, waUploadToServer, timeoutMs)
+			? await uploadingNecessaryImages(product.images, waUploadToServer, timeoutMs, logger)
 			: product.images
 	}
 	return product
@@ -231,7 +233,8 @@ export async function uploadingNecessaryImagesOfProduct<T extends ProductUpdate 
 export const uploadingNecessaryImages = async (
 	images: WAMediaUpload[],
 	waUploadToServer: WAMediaUploadFunction,
-	timeoutMs = 30_000
+	timeoutMs = 30_000,
+	logger?: ILogger
 ) => {
 	const results = await Promise.all(
 		images.map<Promise<{ url: string }>>(async img => {
@@ -261,7 +264,7 @@ export const uploadingNecessaryImages = async (
 				timeoutMs
 			})
 
-			await fs.unlink(filePath).catch(err => console.log('Error deleting temp file ', err))
+			await fs.unlink(filePath).catch(err => logger?.warn({ err }, 'Error deleting temp file'))
 
 			return { url: getUrlFromDirectPath(directPath) }
 		})

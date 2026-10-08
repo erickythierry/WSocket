@@ -13,6 +13,7 @@ export declare const makeSemaphore: (permits: number) => {
     release: () => void;
     readonly active: number;
 };
+/** um mutex por chave; a chave sai do mapa quando a última tarefa dela termina */
 export declare const makeKeyedMutex: () => {
     mutex<T>(key: string, task: () => Promise<T> | T): Promise<T>;
 };

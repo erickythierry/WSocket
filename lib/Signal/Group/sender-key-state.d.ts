@@ -33,6 +33,7 @@ export declare class SenderKeyState {
     hasSenderMessageKey(iteration: number): boolean;
     addSenderMessageKey(senderMessageKey: SenderMessageKey): void;
     removeSenderMessageKey(iteration: number): SenderMessageKey | null;
+    clearSenderMessageKeys(): void;
     getStructure(): SenderKeyStateStructure;
 }
 export {};

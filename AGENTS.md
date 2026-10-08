@@ -22,7 +22,7 @@ yarn example                # run Example/example.ts via ts-node
 yarn gen:protobuf           # regenerate WAProto/index.js + index.d.ts from WAProto.proto
 ```
 
-The compiled output goes to `lib/` (gitignored). The package ships `lib/`, `WAProto/`, and `engine-requirements.js`.
+The compiled output goes to `lib/`, which is committed (the backend installs this fork from the repo). Every change in `src/` ships with the rebuilt `lib/` in the same diff. The package ships `lib/`, `WAProto/`, and `engine-requirements.js`.
 
 > **Note:** Running tests is not required when working in this repo. Use `yarn build:tsc` for type-checking and rely on static code analysis. The test suite requires a live WhatsApp connection for most cases and is not part of the normal development validation flow.
 
@@ -63,7 +63,7 @@ WhatsApp uses two serialization formats:
 ### End-to-End Encryption (Signal Protocol)
 
 Individual messages: handled by the `libsignal` dependency via `src/Signal/libsignal.ts` which implements `SignalRepository`.  
-Group messages: sender-key scheme implemented in TypeScript in `src/Signal/Group/` (mirrored as legacy JS in `WASignalGroup/`).
+Group messages: sender-key scheme implemented in TypeScript in `src/Signal/Group/`.
 
 The `makeSignalRepository` config option lets callers swap the Signal backend.
 

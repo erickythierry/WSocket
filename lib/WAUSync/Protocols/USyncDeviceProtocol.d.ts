@@ -13,6 +13,8 @@ export type DeviceListData = {
 export type ParsedDeviceInfo = {
     deviceList?: DeviceListData[];
     keyIndex?: KeyIndexData;
+    /** o servidor respondeu <error> para este usuário: lista vazia não quer dizer "sem device" */
+    error?: boolean;
 };
 export declare class USyncDeviceProtocol implements USyncQueryProtocol {
     name: string;

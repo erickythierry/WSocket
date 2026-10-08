@@ -15,5 +15,6 @@ export declare const makeNoiseHandler: ({ keyPair: { private: privateKey, public
     finishInit: () => Promise<void>;
     processHandshake: ({ serverHello }: proto.HandshakeMessage, noiseKey: KeyPair) => Promise<Buffer<ArrayBuffer>>;
     encodeFrame: (data: Buffer | Uint8Array) => Buffer<ArrayBuffer>;
-    decodeFrame: (newData: Buffer | Uint8Array, onFrame: (buff: Uint8Array | BinaryNode) => void) => Promise<void>;
+    /** serializado: o inflate assíncrono deixava um frame comprimido terminar depois do seguinte */
+    decodeFrame: (newData: Buffer | Uint8Array, onFrame: (buff: Uint8Array | BinaryNode) => void) => Promise<unknown>;
 };

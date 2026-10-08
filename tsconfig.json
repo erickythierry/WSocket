@@ -6,6 +6,7 @@
     "allowJs": false,
     "checkJs": false,
     "outDir": "lib",
+    "rootDir": "src",
     "strict": false,
     "strictNullChecks": true,
     "skipLibCheck": true,

@@ -12,7 +12,7 @@ export declare const encodeSyncdPatch: ({ type, index, syncAction, apiVersion, o
     patch: proto.ISyncdPatch;
     state: LTHashState;
 }>;
-export declare const decodeSyncdMutations: (msgMutations: (proto.ISyncdMutation | proto.ISyncdRecord)[], initialState: LTHashState, getAppStateSyncKey: FetchAppStateSyncKey, onMutation: (mutation: ChatMutation) => void, validateMacs: boolean) => Promise<{
+export declare const decodeSyncdMutations: (msgMutations: (proto.ISyncdMutation | proto.ISyncdRecord)[], initialState: LTHashState, getAppStateSyncKey: FetchAppStateSyncKey, onMutation: (mutation: ChatMutation) => void, validateMacs: boolean, copyIndexValueMap?: boolean) => Promise<{
     hash: Buffer<any>;
     indexValueMap: {
         [indexMacBase64: string]: {
@@ -20,7 +20,7 @@ export declare const decodeSyncdMutations: (msgMutations: (proto.ISyncdMutation 
         };
     };
 }>;
-export declare const decodeSyncdPatch: (msg: proto.ISyncdPatch, name: WAPatchName, initialState: LTHashState, getAppStateSyncKey: FetchAppStateSyncKey, onMutation: (mutation: ChatMutation) => void, validateMacs: boolean) => Promise<{
+export declare const decodeSyncdPatch: (msg: proto.ISyncdPatch, name: WAPatchName, initialState: LTHashState, getAppStateSyncKey: FetchAppStateSyncKey, onMutation: (mutation: ChatMutation) => void, validateMacs: boolean, copyIndexValueMap?: boolean) => Promise<{
     hash: Buffer<any>;
     indexValueMap: {
         [indexMacBase64: string]: {

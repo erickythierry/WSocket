@@ -1,4 +1,3 @@
-import { chunk } from 'lodash'
 import { KEY_BUNDLE_TYPE } from '../Defaults'
 import { SignalRepository } from '../Types'
 import {
@@ -10,7 +9,6 @@ import {
 	SignedKeyPair
 } from '../Types/Auth'
 import {
-	assertNodeErrorFree,
 	BinaryNode,
 	getBinaryNodeChild,
 	getBinaryNodeChildBuffer,
@@ -149,40 +147,47 @@ export const parseAndInjectE2ESessions = async (node: BinaryNode, repository: Si
 					signature: getBinaryNodeChildBuffer(key, 'signature')!
 				}
 			: undefined
-	const nodes = getBinaryNodeChildren(getBinaryNodeChild(node, 'list'), 'user')
-	for (const node of nodes) {
-		assertNodeErrorFree(node)
-	}
+	// usuário com <error> fica de fora (cai no retry) em vez de abortar o envio inteiro
+	const nodes = getBinaryNodeChildren(getBinaryNodeChild(node, 'list'), 'user').filter(
+		node => !getBinaryNodeChild(node, 'error')
+	)
+	const failed: string[] = []
 
-	// Most of the work in repository.injectE2ESession is CPU intensive, not IO
-	// So Promise.all doesn't really help here,
-	// but blocks even loop if we're using it inside keys.transaction, and it makes it "sync" actually
-	// This way we chunk it in smaller parts and between those parts we can yield to the event loop
-	// It's rare case when you need to E2E sessions for so many users, but it's possible
-	const chunkSize = 100
-	const chunks = chunk(nodes, chunkSize)
-	for (const nodesChunk of chunks) {
+	// injectE2ESession é CPU (~11 ms por device, verificação de assinatura em JS):
+	// lotes pequenos com setImmediate entre eles devolvem o event loop às outras sessões
+	const chunkSize = 16
+	for (let i = 0; i < nodes.length; i += chunkSize) {
+		if (i) {
+			await new Promise(resolve => setImmediate(resolve))
+		}
+
 		await Promise.all(
-			nodesChunk.map(async node => {
+			nodes.slice(i, i + chunkSize).map(async node => {
 				const signedKey = getBinaryNodeChild(node, 'skey')!
 				const key = getBinaryNodeChild(node, 'key')!
 				const identity = getBinaryNodeChildBuffer(node, 'identity')!
 				const jid = node.attrs.jid
-				const registrationId = getBinaryNodeChildUInt(node, 'registration', 4);
+				const registrationId = getBinaryNodeChildUInt(node, 'registration', 4)
 				const newlid = convertlidDevice(jid, lid, meid, melid)
 
-				await repository.injectE2ESession({
-					jid: newlid,
-					session: {
-						registrationId: registrationId!,
-						identityKey: generateSignalPubKey(identity),
-						signedPreKey: extractKey(signedKey)!,
-						preKey: extractKey(key)!
-					}
-				})
+				try {
+					await repository.injectE2ESession({
+						jid: newlid,
+						session: {
+							registrationId: registrationId!,
+							identityKey: generateSignalPubKey(identity),
+							signedPreKey: extractKey(signedKey)!,
+							preKey: extractKey(key)!
+						}
+					})
+				} catch {
+					failed.push(jid)
+				}
 			})
 		)
 	}
+
+	return { failed }
 }
 
 export const extractDeviceJids = (result: USyncQueryResultList[], myJid: string, excludeZeroDevices: boolean, mylid?:string) => {
@@ -223,6 +228,8 @@ export const getNextPreKeys = async ({ creds, keys }: AuthenticationState, count
 		nextPreKeyId: Math.max(lastPreKeyId + 1, creds.nextPreKeyId),
 		firstUnuploadedPreKeyId: Math.max(creds.firstUnuploadedPreKeyId, lastPreKeyId + 1)
 	}
+	// reserva os ids já, antes do await: outra chamada concorrente leria o mesmo nextPreKeyId
+	Object.assign(creds, update)
 
 	await keys.set({ 'pre-key': newPreKeys })
 

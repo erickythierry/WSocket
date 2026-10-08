@@ -1,5 +1,6 @@
 import { CatalogCollection, OrderDetails, Product, ProductCreate, ProductUpdate, WAMediaUpload, WAMediaUploadFunction } from '../Types';
 import { BinaryNode } from '../WABinary';
+import { ILogger } from './logger';
 export declare const parseCatalogNode: (node: BinaryNode) => {
     products: Product[];
     nextPageCursor: string | undefined;
@@ -13,10 +14,10 @@ export declare const parseProductNode: (productNode: BinaryNode) => Product;
 /**
  * Uploads images not already uploaded to WA's servers
  */
-export declare function uploadingNecessaryImagesOfProduct<T extends ProductUpdate | ProductCreate>(product: T, waUploadToServer: WAMediaUploadFunction, timeoutMs?: number): Promise<T>;
+export declare function uploadingNecessaryImagesOfProduct<T extends ProductUpdate | ProductCreate>(product: T, waUploadToServer: WAMediaUploadFunction, timeoutMs?: number, logger?: ILogger): Promise<T>;
 /**
  * Uploads images not already uploaded to WA's servers
  */
-export declare const uploadingNecessaryImages: (images: WAMediaUpload[], waUploadToServer: WAMediaUploadFunction, timeoutMs?: number) => Promise<{
+export declare const uploadingNecessaryImages: (images: WAMediaUpload[], waUploadToServer: WAMediaUploadFunction, timeoutMs?: number, logger?: ILogger) => Promise<{
     url: string;
 }[]>;

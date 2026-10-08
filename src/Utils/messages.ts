@@ -53,6 +53,8 @@ type MediaUploadData = {
 	backgroundArgb?: number;
 };
 
+const MAX_WAVEFORM_SECONDS = 90
+
 const MIMETYPE_MAP: { [T in MediaType]?: string } = {
 	image: 'image/jpeg',
 	video: 'video/mp4',
@@ -100,6 +102,7 @@ const assertColor = async color => {
 	let assertedColor;
 	if (typeof color === 'number') {
 		assertedColor = color > 0 ? color : 0xffffffff + Number(color) + 1;
+		return assertedColor;
 	} else {
 		let hex = color.trim().replace('#', '');
 		if (hex.length <= 6) {
@@ -217,7 +220,7 @@ export const prepareWAMessageMedia = async (
 	const requiresDurationComputation = mediaType === 'audio' && typeof uploadData.seconds === 'undefined';
 	const requiresThumbnailComputation =
 		(mediaType === 'image' || mediaType === 'video') && typeof uploadData['jpegThumbnail'] === 'undefined';
-	const requiresWaveformProcessing = mediaType === 'audio' && uploadData.ptt === true;
+	const requiresWaveformProcessing = mediaType === 'audio' && uploadData.ptt === true && !uploadData.waveform;
 	const requiresAudioBackground = options.backgroundColor && mediaType === 'audio' && uploadData.ptt === true;
 	const requiresOriginalForSomeProcessing = requiresDurationComputation || requiresThumbnailComputation;
 	const { mediaKey, encFilePath, originalFilePath, fileEncSha256, fileSha256, fileLength } = await encryptedStream(
@@ -264,7 +267,8 @@ export const prepareWAMessageMedia = async (
 					logger?.debug('computed audio duration');
 				}
 
-				if (requiresWaveformProcessing) {
+				// decodifica o áudio inteiro na thread principal: acima de ~90 s sai sem waveform
+				if (requiresWaveformProcessing && (uploadData.seconds ?? 0) <= MAX_WAVEFORM_SECONDS) {
 					uploadData.waveform = await getAudioWaveform(originalFilePath!, logger);
 					logger?.debug('processed waveform');
 				}

@@ -13,7 +13,7 @@ import {
 	WAMessageStubType
 } from '../Types'
 import { getContentType, normalizeMessageContent } from '../Utils/messages'
-import { areJidsSameUser, isJidBroadcast, isJidStatusBroadcast, jidNormalizedUser } from '../WABinary'
+import { areJidsSameUser, isJidBroadcast, isJidStatusBroadcast, jidDecode, jidNormalizedUser } from '../WABinary'
 import { aesDecryptGCM, hmacSign } from './crypto'
 import { toNumber } from './generics'
 import { downloadHistory, processHistoryMessage } from './history'
@@ -143,6 +143,35 @@ export function decryptPollVote(
 	function toBinary(txt: string) {
 		return Buffer.from(txt)
 	}
+}
+
+const forgetSenderKeyMemory = async (keyStore: SignalKeyStoreWithTransaction, groupJid: string, participants: string[]) => {
+	const users = new Set(participants.map(p => jidDecode(p)?.user).filter(Boolean))
+	const memory = (await keyStore.get('sender-key-memory', [groupJid]))[groupJid]
+	if (!users.size || !memory) {
+		return
+	}
+
+	const next = { ...memory }
+	let changed = false
+	for (const deviceJid of Object.keys(next)) {
+		if (users.has(jidDecode(deviceJid)?.user)) {
+			delete next[deviceJid]
+			changed = true
+		}
+	}
+
+	if (changed) {
+		await keyStore.set({ 'sender-key-memory': { [groupJid]: next } })
+	}
+}
+
+const forgetGroupSenderKeys = async (keyStore: SignalKeyStoreWithTransaction, groupJid: string, meJid: string) => {
+	const me = jidDecode(meJid)
+	await keyStore.set({
+		'sender-key-memory': { [groupJid]: null },
+		...(me ? { 'sender-key': { [`${groupJid}::${me.user}::${me.device || 0}`]: null } } : {})
+	})
 }
 
 const processMessage = async (
@@ -354,7 +383,8 @@ const processMessage = async (
 			ev.emit('group.join-request', { id: jid, author: message.participant!, participant, action, method: method! })
 		}
 
-		const participantsIncludesMe = () => participants.find(jid => areJidsSameUser(meId, jid))
+		const participantsIncludesMe = () =>
+			participants.find(jid => areJidsSameUser(meId, jid) || (!!creds.me?.lid && areJidsSameUser(creds.me.lid, jid)))
 
 		switch (message.messageStubType) {
 			case WAMessageStubType.GROUP_PARTICIPANT_CHANGE_NUMBER:
@@ -368,6 +398,19 @@ const processMessage = async (
 				// mark the chat read only if you left the group
 				if (participantsIncludesMe()) {
 					chat.readOnly = true
+					// o bot saiu: a memória de SKDM e a própria sender key do grupo só ocupam espaço (recriadas se voltar)
+					try {
+						await forgetGroupSenderKeys(keyStore, jid, creds.me?.lid || meId)
+					} catch (err) {
+						logger?.warn({ err, jid }, 'falha ao limpar chaves do grupo que o bot saiu')
+					}
+				} else {
+					// quem sai perde a marca de "já recebeu a sender key"; se voltar, recebe o SKDM no próximo envio
+					try {
+						await forgetSenderKeyMemory(keyStore, jid, participants)
+					} catch (err) {
+						logger?.warn({ err, jid }, 'falha ao limpar sender-key-memory de quem saiu')
+					}
 				}
 
 				break
@@ -426,55 +469,7 @@ const processMessage = async (
 				emitGroupRequestJoin(participant, action, method)
 				break
 		}
-	} /*  else if(content?.pollUpdateMessage) {
-		const creationMsgKey = content.pollUpdateMessage.pollCreationMessageKey!
-		// we need to fetch the poll creation message to get the poll enc key
-		// TODO: make standalone, remove getMessage reference
-		// TODO: Remove entirely
-		const pollMsg = await getMessage(creationMsgKey)
-		if(pollMsg) {
-			const meIdNormalised = jidNormalizedUser(meId)
-			const pollCreatorJid = getKeyAuthor(creationMsgKey, meIdNormalised)
-			const voterJid = getKeyAuthor(message.key, meIdNormalised)
-			const pollEncKey = pollMsg.messageContextInfo?.messageSecret!
-
-			try {
-				const voteMsg = decryptPollVote(
-					content.pollUpdateMessage.vote!,
-					{
-						pollEncKey,
-						pollCreatorJid,
-						pollMsgId: creationMsgKey.id!,
-						voterJid,
-					}
-				)
-				ev.emit('messages.update', [
-					{
-						key: creationMsgKey,
-						update: {
-							pollUpdates: [
-								{
-									pollUpdateMessageKey: message.key,
-									vote: voteMsg,
-									senderTimestampMs: (content.pollUpdateMessage.senderTimestampMs! as Long).toNumber(),
-								}
-							]
-						}
-					}
-				])
-			} catch(err) {
-				logger?.warn(
-					{ err, creationMsgKey },
-					'failed to decrypt poll vote'
-				)
-			}
-		} else {
-			logger?.warn(
-				{ creationMsgKey },
-				'poll creation message not found, cannot decrypt update'
-			)
-		}
-		} */
+	}
 
 	if (Object.keys(chat).length > 1) {
 		ev.emit('chats.update', [chat])

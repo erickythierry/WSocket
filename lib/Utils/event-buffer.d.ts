@@ -1,4 +1,4 @@
-import { BaileysEventEmitter, BaileysEventMap } from '../Types';
+import { BaileysEvent, BaileysEventEmitter, BaileysEventMap } from '../Types';
 import { ILogger } from './logger';
 /**
  * A map that contains a list of all events that have been triggered
@@ -26,10 +26,5 @@ type BaileysBufferableEventEmitter = BaileysEventEmitter & {
     /** is there an ongoing buffer */
     isBuffering(): boolean;
 };
-/**
- * The event buffer logically consolidates different events into a single event
- * making the data processing more efficient.
- * @param ev the baileys event emitter
- */
-export declare const makeEventBuffer: (logger: ILogger) => BaileysBufferableEventEmitter;
+export declare const makeEventBuffer: (logger: ILogger, ignoredEvents?: BaileysEvent[]) => BaileysBufferableEventEmitter;
 export {};

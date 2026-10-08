@@ -63,7 +63,8 @@ export type AuthenticationCreds = SignalCreds & {
 export type SignalDataTypeMap = {
     'pre-key': KeyPair;
     session: Uint8Array;
-    'sender-key': Uint8Array;
+    /** JSON do SenderKeyRecord; Uint8Array é o formato antigo, ainda lido */
+    'sender-key': Uint8Array | string;
     'sender-key-memory': {
         [jid: string]: boolean;
     };

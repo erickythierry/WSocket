@@ -1,3 +1,4 @@
+import { Boom } from '@hapi/boom';
 import { proto } from '../../WAProto';
 import { GroupMetadata, ParticipantAction, SocketConfig, WAMessageKey } from '../Types';
 import { BinaryNode } from '../WABinary';
@@ -46,9 +47,19 @@ export declare const makeGroupsSocket: (config: SocketConfig) => {
         [_: string]: GroupMetadata;
     }>;
     getBotListV2: () => Promise<import("../Types").BotListInfo[]>;
-    processingMutex: {
+    messageMutex: {
+        mutex<T>(chat: string, author: string, task: () => Promise<T> | T): Promise<T>;
+    };
+    receiptMutex: {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
     };
+    notificationMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    appStatePatchMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    placeholderResendCache: import("../Types").CacheStore;
     fetchPrivacySettings: (force?: boolean) => Promise<{
         [_: string]: string;
     }>;
@@ -123,7 +134,8 @@ export declare const makeGroupsSocket: (config: SocketConfig) => {
     sendNode: (frame: BinaryNode) => Promise<void>;
     logout: (msg?: string) => Promise<void>;
     end: (error: Error | undefined) => void;
-    onUnexpectedError: (err: Error | import("@hapi/boom").Boom, msg: string) => void;
+    onUnexpectedError: (err: Error | Boom, msg: string) => void;
+    onSocketEnd: (handler: () => void) => void;
     uploadPreKeys: (count?: number) => Promise<void>;
     uploadPreKeysToServerIfRequired: () => Promise<void>;
     requestPairingCode: (phoneNumber: string, customPairingCode?: string) => Promise<string>;

@@ -6,12 +6,11 @@ import ListType = proto.Message.ListMessage.ListType
 import {
 	AnyMessageContent,
 	CacheStore,
+	GroupMetadata,
 	MediaConnInfo,
 	MessageReceiptType,
 	MessageRelayOptions,
 	MiscMessageGenerationOptions,
-	SecretGroupMessageOptions,
-	SignalDataTypeMap,
 	SocketConfig,
 	WAMessageKey
 } from '../Types'
@@ -37,19 +36,7 @@ import {
 } from '../Utils'
 import { getUrlInfo } from '../Utils/link-preview'
 import { BoundedTtlMap } from '../Utils/bounded-ttl-map'
-import { generateCsToken, readNctSalt } from '../Utils/cs-token-utils'
-import { makeMutex, makeSemaphore } from '../Utils/make-mutex'
-import {
-	buildMergedTcTokenIndexWrite,
-	isRegularUser,
-	isTcTokenExpired,
-	resolvePrivacyTokenIntent,
-	resolveTcTokenStorageJid,
-	shouldSendNewTcToken,
-	storeTcTokensFromIqResult,
-	TC_TOKEN_INDEX_KEY,
-	type LidResolver
-} from '../Utils/tc-token-utils'
+import { makeKeyedMutex } from '../Utils/make-mutex'
 import {
 	areJidsSameUser,
 	BinaryNode,
@@ -65,9 +52,17 @@ import {
 	JidWithDevice,
 	S_WHATSAPP_NET
 } from '../WABinary'
-import { USyncQuery, USyncUser } from '../WAUSync'
+import { ParsedDeviceInfo, USyncQuery, USyncUser } from '../WAUSync'
 import { makeNewsletterSocket } from './newsletter'
+import { makeTcTokenManager } from './tc-token'
 import caches from '../Utils/cache-utils'
+
+const USYNC_DEVICES_BATCH = 400
+const SESSION_FETCH_BATCH = 400
+const ENCRYPT_BATCH = 200
+const USER_DEVICES_NEGATIVE_TTL = 10 * 60
+/** ±20% para as entradas de um grupo, criadas juntas, não vencerem todas no mesmo envio */
+const jitteredTtl = (ttl: number) => Math.round(ttl * (0.8 + Math.random() * 0.4))
 
 export const makeMessagesSocket = (config: SocketConfig) => {
 	const {
@@ -85,130 +80,16 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		allowedUsers: string[]
 		decryptFailHide: boolean
 	}
-	// O retry chega depois do sendMessage e não carrega includeJids/excludeJids. Guardamos o
+	// O retry chega depois do sendMessage e não carrega includeJids. Guardamos o
 	// conjunto resolvido (PN + LID) para recuperar apenas devices que receberam o relay original.
-	const selectiveRelayCache = new NodeCache<SelectiveRelayContext>({
-		stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY,
-		useClones: false
-	})
-	const selectiveMessageCache = new NodeCache<proto.IMessage>({
-		stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY,
-		useClones: false
-	})
+	// guardam a mensagem inteira: teto de entradas e 15 min (retry chega em segundos), sem timer por socket
+	const selectiveRelayCache = new BoundedTtlMap<string, SelectiveRelayContext>(500, 15 * 60 * 1000)
+	const selectiveMessageCache = new BoundedTtlMap<string, proto.IMessage>(500, 15 * 60 * 1000)
 
-	const inFlightTcTokenIssuance = new Set<string>()
-	const TC_TOKEN_MAX_CONCURRENT_ISSUANCE = 2
-	// teto único pros dois caminhos: emissão pós-envio desiste quando não há vaga (a próxima
-	// mensagem tenta de novo), reemissão por troca de identidade entra na fila e espera
-	const tcTokenIssuanceSemaphore = makeSemaphore(TC_TOKEN_MAX_CONCURRENT_ISSUANCE)
-
-	const TC_TOKEN_INDEX_FLUSH_MAX_PENDING = 100
-	const TC_TOKEN_INDEX_MAX_PENDING = 5_000
-	const TC_TOKEN_INDEX_FLUSH_INTERVAL_MS = 30_000
-	const pendingTcTokenIndexJids = new Set<string>()
-	const recentlyTrackedTcTokenJids = new BoundedTtlMap<string, true>(5_000, 24 * 60 * 60 * 1000)
-	let tcTokenIndexFlushTimer: ReturnType<typeof setTimeout> | undefined
-	let tcTokenIndexFlushInFlight: Promise<void> | undefined
-	let lastTcTokenIndexFullWarnMs = 0
-	const tcTokenIndexMutex = makeMutex()
-
-	function armTcTokenIndexFlush() {
-		if (tcTokenIndexFlushTimer || tcTokenIndexFlushInFlight) return
-		tcTokenIndexFlushTimer = setTimeout(() => {
-			tcTokenIndexFlushTimer = undefined
-			void flushTcTokenIndex().catch(err => logger.warn({ err: err?.message }, 'falha ao salvar índice de tctokens'))
-		}, TC_TOKEN_INDEX_FLUSH_INTERVAL_MS)
-	}
-
-	function trackTcTokenJid(jid: string) {
-		if (!jid || jid === TC_TOKEN_INDEX_KEY || recentlyTrackedTcTokenJids.has(jid)) return
-		if (pendingTcTokenIndexJids.size >= TC_TOKEN_INDEX_MAX_PENDING) {
-			if (Date.now() - lastTcTokenIndexFullWarnMs >= 60_000) {
-				lastTcTokenIndexFullWarnMs = Date.now()
-				logger.warn({ pending: pendingTcTokenIndexJids.size }, 'fila do índice de tctokens cheia')
-			}
-			return
-		}
-
-		recentlyTrackedTcTokenJids.set(jid, true)
-		pendingTcTokenIndexJids.add(jid)
-		if (pendingTcTokenIndexJids.size >= TC_TOKEN_INDEX_FLUSH_MAX_PENDING) {
-			void flushTcTokenIndex().catch(err => logger.warn({ err: err?.message }, 'falha ao salvar lote do índice de tctokens'))
-		} else {
-			armTcTokenIndexFlush()
-		}
-	}
-
-	async function writePendingTcTokenIndex() {
-		while (pendingTcTokenIndexJids.size) {
-			const batch = [...pendingTcTokenIndexJids]
-			pendingTcTokenIndexJids.clear()
-			try {
-				const write = await buildMergedTcTokenIndexWrite(authState.keys, batch)
-				await authState.keys.set({ tctoken: write })
-			} catch (err) {
-				for (const jid of batch) pendingTcTokenIndexJids.add(jid)
-				throw err
-			}
-		}
-	}
-
-	function flushTcTokenIndex(): Promise<void> {
-		if (tcTokenIndexFlushInFlight) return tcTokenIndexFlushInFlight
-		if (tcTokenIndexFlushTimer) {
-			clearTimeout(tcTokenIndexFlushTimer)
-			tcTokenIndexFlushTimer = undefined
-		}
-
-		tcTokenIndexFlushInFlight = tcTokenIndexMutex.mutex(writePendingTcTokenIndex).finally(() => {
-			tcTokenIndexFlushInFlight = undefined
-			if (pendingTcTokenIndexJids.size) armTcTokenIndexFlush()
-		})
-		return tcTokenIndexFlushInFlight
-	}
-
-	function withFlushedTcTokenIndex<T>(task: () => Promise<T>): Promise<T> {
-		return tcTokenIndexMutex.mutex(async () => {
-			await writePendingTcTokenIndex()
-			return task()
-		})
-	}
-
-	const pnToLid = new BoundedTtlMap<string, string>(5_000, 10 * 60 * 1000)
-	const getLidForPn: LidResolver = pnJid =>
-		pnToLid.get(jidNormalizedUser(pnJid)) || caches.lidCache.get(jidNormalizedUser(pnJid))
-
-	function cacheLidMapping(pnJid?: string, lidJid?: string) {
-		if (!pnJid || !lidJid) return
-		const pn = jidNormalizedUser(pnJid)
-		const lid = jidNormalizedUser(lidJid)
-		if (!isJidUser(pn) || !isLidUser(lid)) return
-
-		pnToLid.set(pn, lid)
-		caches.lidCache.set(pn, lid)
-	}
-
-	const tcTokenStorageJid = (jid: string) => resolveTcTokenStorageJid(jid, getLidForPn)
-
-	async function buildCsTokenForJid(jid: string): Promise<{
-		token?: Buffer
-		reason?: 'missing_lid' | 'missing_nct_salt' | 'keystore_error'
-	}> {
-		try {
-			const recipientLid = tcTokenStorageJid(jid)
-			if (!isLidUser(recipientLid)) return { reason: 'missing_lid' }
-			const salt = await readNctSalt(authState.keys)
-			if (!salt?.length) return { reason: 'missing_nct_salt' }
-			return { token: generateCsToken(salt, recipientLid) }
-		} catch (err) {
-			logger.debug({ jid, err: (err as Error)?.message }, 'falha ao gerar cstoken')
-			return { reason: 'keystore_error' }
-		}
-	}
 	const {
 		ev,
 		authState,
-		processingMutex,
+		messageMutex,
 		signalRepository,
 		upsertMessage,
 		query,
@@ -218,12 +99,41 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		groupToggleEphemeral
 	} = sock
 
-	const userDevicesCache: CacheStore =
-		config.userDevicesCache ||
-		new NodeCache<any>({
+	const {
+		trackTcTokenJid,
+		flushTcTokenIndex,
+		withFlushedTcTokenIndex,
+		getLidForPn,
+		cacheLidMapping,
+		tcTokenStorageJid,
+		appendPrivacyToken,
+		maybeIssueTcToken,
+		reissueTcTokenAfterIdentityChange,
+		getPrivacyTokens,
+		scheduleTcTokenPrune,
+		cancelTcTokenPrune
+	} = makeTcTokenManager({ authState, logger, query })
+
+	let userDevicesCache: CacheStore
+	if (config.userDevicesCache) {
+		userDevicesCache = config.userDevicesCache
+	} else {
+		const cache = new NodeCache<any>({
 			stdTTL: DEFAULT_CACHE_TTLS.USER_DEVICES,
 			useClones: false
 		})
+		sock.onSocketEnd(() => cache.close())
+		userDevicesCache = cache
+	}
+
+	const groupRelayMutex = makeKeyedMutex()
+
+	const emitOwnMessage = (msg: proto.IWebMessageInfo) => {
+		const author = jidNormalizedUser(authState.creds.me?.id)
+		messageMutex
+			.mutex(jidNormalizedUser(msg.key?.remoteJid || author), author, () => upsertMessage(msg, 'append'))
+			.catch(err => logger.warn({ err, id: msg.key?.id }, 'falha ao emitir mensagem própria'))
+	}
 
 	let mediaConn: Promise<MediaConnInfo>
 	const refreshMediaConn = async (forceGet = false) => {
@@ -327,8 +237,15 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	}
 
 	/** Fetch all the devices we've to send a message to */
-	const getUSyncDevices = async (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => {
+	/**
+	 * Devices dos jids. O cache guarda a lista completa (com o device 0) e o filtro sai na leitura: o envio 1:1
+	 * pede sem device 0 e o de grupo com, e a mesma entrada servia os dois cortada.
+	 * `complete` é falso quando algum lote do USync não respondeu ou veio usuário com erro.
+	 */
+	const fetchUSyncDevices = async (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => {
 		const deviceResults: JidWithDevice[] = []
+		const keep = (item: JidWithDevice) => !ignoreZeroDevices || item.device !== 0
+		let complete = true
 
 		if (!useCache) {
 			logger.debug('not using cache for devices')
@@ -342,7 +259,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			if (useCache) {
 				const devices = userDevicesCache.get<JidWithDevice[]>(jid)
 				if (devices) {
-					deviceResults.push(...devices)
+					deviceResults.push(...devices.filter(keep))
 
 					logger.trace({ jid }, 'using cache for devices')
 				} else {
@@ -354,41 +271,63 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		}
 
 		if (!toFetch.length) {
-			return deviceResults
+			return { devices: deviceResults, complete }
 		}
 
-		const query = new USyncQuery().withContext('message').withDeviceProtocol()
+		const deviceMap: { [_: string]: JidWithDevice[] } = {}
+		const answeredWithoutError = new Set<string>()
+		// grupo grande num IQ único estoura o tamanho da resposta: consulta em lotes
+		for (let i = 0; i < toFetch.length; i += USYNC_DEVICES_BATCH) {
+			const query = new USyncQuery().withContext('message').withDeviceProtocol()
+			for (const jid of toFetch.slice(i, i + USYNC_DEVICES_BATCH)) {
+				query.withUser(new USyncUser().withId(jid))
+			}
 
-		for (const jid of toFetch) {
-			query.withUser(new USyncUser().withId(jid))
-		}
+			const result = await sock.executeUSyncQuery(query)
+			if (!result) {
+				complete = false
+				continue
+			}
 
-		const result = await sock.executeUSyncQuery(query)
+			for (const item of result.list) {
+				const devices = (item as { devices?: ParsedDeviceInfo }).devices
+				if (devices?.error) {
+					complete = false
+				} else if (item.id) {
+					answeredWithoutError.add(jidNormalizedUser(item.id))
+				}
+			}
 
-		if (result) {
-			const extracted = extractDeviceJids(
-				result?.list,
-				authState.creds.me!.id,
-				ignoreZeroDevices,
-				authState.creds.me?.lid
-			)
-			const deviceMap: { [_: string]: JidWithDevice[] } = {}
-
+			const extracted = extractDeviceJids(result.list, authState.creds.me!.id, false, authState.creds.me?.lid)
 			for (const item of extracted) {
-				const cacheKey = jidNormalizedUser(item.jid!)
+				const cacheKey = jidNormalizedUser(item.jid)
 				deviceMap[cacheKey] = deviceMap[cacheKey] || []
 				deviceMap[cacheKey].push(item)
 
-				deviceResults.push(item)
-			}
-
-			for (const key in deviceMap) {
-				userDevicesCache.set(key, deviceMap[key])
+				if (keep(item)) {
+					deviceResults.push(item)
+				}
 			}
 		}
 
-		return deviceResults
+		for (const key in deviceMap) {
+			userDevicesCache.set(key, deviceMap[key], jitteredTtl(DEFAULT_CACHE_TTLS.USER_DEVICES))
+		}
+
+		// cache negativo: sem isso quem não tem device é reconsultado em todo envio. Só para quem o servidor
+		// respondeu sem erro; erro passageiro não pode deixar o usuário 10 min fora do envio.
+		for (const jid of toFetch) {
+			if (answeredWithoutError.has(jid) && !deviceMap[jid]) {
+				userDevicesCache.set(jid, [], USER_DEVICES_NEGATIVE_TTL)
+			}
+		}
+
+		return { devices: deviceResults, complete }
 	}
+
+	/** Fetch all the devices we've to send a message to */
+	const getUSyncDevices = async (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) =>
+		(await fetchUSyncDevices(jids, useCache, ignoreZeroDevices)).devices
 
 	const assertSessions = async (jids: string[], force: boolean, lids?: string) => {
 		let didFetchNewSession = false
@@ -410,8 +349,10 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 		}
 
-		if (jidsRequiringFetch.length) {
-			logger.debug({ jidsRequiringFetch }, 'fetching sessions')
+		// grupo grande num IQ único: resposta enorme e todas as sessões injetadas de uma vez
+		for (let i = 0; i < jidsRequiringFetch.length; i += SESSION_FETCH_BATCH) {
+			const batch = jidsRequiringFetch.slice(i, i + SESSION_FETCH_BATCH)
+			logger.debug({ jidsRequiringFetch: batch }, 'fetching sessions')
 			const result = await query({
 				tag: 'iq',
 				attrs: {
@@ -423,14 +364,17 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					{
 						tag: 'key',
 						attrs: {},
-						content: jidsRequiringFetch.map(jid => ({
+						content: batch.map(jid => ({
 							tag: 'user',
 							attrs: { jid }
 						}))
 					}
 				]
 			})
-			await parseAndInjectE2ESessions(result, signalRepository, lids, meid, melid)
+			const { failed } = await parseAndInjectE2ESessions(result, signalRepository, lids, meid, melid)
+			if (failed.length) {
+				logger.warn({ failed }, 'falha ao injetar sessão; esses devices ficam para o retry')
+			}
 
 			didFetchNewSession = true
 		}
@@ -480,43 +424,123 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		}
 
 		let shouldIncludeDeviceIdentity = false
+		const failedJids: string[] = []
 
-		const nodes = await Promise.all(
-			patched.map(async patchedMessageWithJid => {
-				const { recipientJid: jid, ...patchedMessage } = patchedMessageWithJid
-				if (!jid) {
-					return {} as BinaryNode
-				}
+		const encryptOne = async (patchedMessageWithJid: (typeof patched)[number]) => {
+			const { recipientJid: jid, ...patchedMessage } = patchedMessageWithJid
+			if (!jid) {
+				return undefined
+			}
 
-				const bytes = encodeWAMessage(patchedMessage)
-				const { type, ciphertext } = await signalRepository.encryptMessage({
+			const bytes = encodeWAMessage(patchedMessage)
+			let encrypted: { type: 'pkmsg' | 'msg'; ciphertext: Uint8Array }
+			try {
+				encrypted = await signalRepository.encryptMessage({
 					jid: convertlidDevice(jid, lid, meid, melid),
 					data: bytes
 				})
-				if (type === 'pkmsg') {
-					shouldIncludeDeviceIdentity = true
-				}
+			} catch (err) {
+				// um device com sessão ruim não derruba o envio dos outros; ele cai no retry
+				logger.warn({ jid, err: (err as Error)?.message }, 'falha ao cifrar para o device')
+				failedJids.push(jid)
+				return undefined
+			}
 
-				const node: BinaryNode = {
-					tag: 'to',
-					attrs: { jid },
-					content: [
-						{
-							tag: 'enc',
-							attrs: {
-								v: '2',
-								type,
-								...(extraAttrs || {})
-							},
-							content: ciphertext
-						}
-					]
-				}
-				return node
-			})
-		)
-		return { nodes, shouldIncludeDeviceIdentity }
+			const { type, ciphertext } = encrypted
+			if (type === 'pkmsg') {
+				shouldIncludeDeviceIdentity = true
+			}
+
+			const node: BinaryNode = {
+				tag: 'to',
+				attrs: { jid },
+				content: [
+					{
+						tag: 'enc',
+						attrs: {
+							v: '2',
+							type,
+							...(extraAttrs || {})
+						},
+						content: ciphertext
+					}
+				]
+			}
+			return node
+		}
+
+		// cifrar milhares de devices num Promise.all só segura o event loop de todas as sessões do processo
+		const results: (BinaryNode | undefined)[] = []
+		for (let i = 0; i < patched.length; i += ENCRYPT_BATCH) {
+			if (i) {
+				await new Promise(resolve => setImmediate(resolve))
+			}
+
+			results.push(...(await Promise.all(patched.slice(i, i + ENCRYPT_BATCH).map(encryptOne))))
+		}
+
+		const nodes = results.filter((node): node is BinaryNode => !!node)
+		return { nodes, shouldIncludeDeviceIdentity, failedJids }
 	}
+
+	/** usuários (PN e LID, sem server) de um participante do grupo */
+	const participantUsers = (p: { id?: string; lid?: string }) =>
+		[p.id, p.lid].map(jid => (jid ? jidDecode(jid)?.user : undefined)).filter((user): user is string => !!user)
+
+	const participantMatches = (p: { id?: string; lid?: string; jid?: string }, jid: string) =>
+		[p.id, p.lid, p.jid].some(candidate => !!candidate && areJidsSameUser(candidate, jid))
+
+	/** usuários de cada jid da lista, já com o par PN/LID que a metadata do grupo conhece */
+	const resolveGroupUsers = (jids: string[], groupData: GroupMetadata | undefined) => {
+		const users = new Set<string>()
+		for (const jid of jids) {
+			const normalized = jidNormalizedUser(jid)
+			const user = jidDecode(normalized)?.user
+			if (user) {
+				users.add(user)
+			}
+
+			for (const p of groupData?.participants || []) {
+				if (participantMatches(p, normalized)) {
+					participantUsers(p).forEach(u => users.add(u))
+				}
+			}
+		}
+
+		return users
+	}
+
+	/**
+	 * Relay seletivo (sussurro): tira de `devices` quem não está em includeJids (o remetente sempre fica) e
+	 * devolve os usuários que podem pedir retry. Quem fica sem device no <participants> não recebe o SKDM e vê
+	 * o stub.
+	 */
+	const applySelectiveRelayFilter = (
+		devices: JidWithDevice[],
+		groupData: GroupMetadata | undefined,
+		{ includeJids, meJids, jlidUser }: { includeJids: string[]; meJids: string[]; jlidUser?: string }
+	) => {
+		const meUsers = meJids.map(jid => jidDecode(jidNormalizedUser(jid))?.user).filter((u): u is string => !!u)
+		// remetente sempre incluído (phone + lid), senão o próprio bot não lê a mensagem
+		const includeUsers = resolveGroupUsers(includeJids, groupData)
+		meUsers.forEach(u => includeUsers.add(u))
+		if (jlidUser) {
+			includeUsers.add(jlidUser)
+		}
+
+		for (let i = devices.length - 1; i >= 0; i--) {
+			if (!devices[i].user || !includeUsers.has(devices[i].user)) {
+				devices.splice(i, 1)
+			}
+		}
+
+		logger.info(
+			{ includeUsers: [...includeUsers], remaining: devices.length },
+			'exclude-relay: whitelist aplicada (apenas includeJids + remetente recebem sender-key)'
+		)
+		return includeUsers
+	}
+
 
 	const relayMessage = async (
 		jid: string,
@@ -531,17 +555,20 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			statusJidList,
 			newsletterMediaId,
 			isretry,
-			excludeJids,
 			includeJids,
 			decryptFailHide
 		}: MessageRelayOptions
 	) => {
+		if (!authState.creds.me?.id) {
+			throw new Boom('Not authenticated')
+		}
+
 		if (additionalAttributes) {
 			additionalAttributes = { ...additionalAttributes }
 		}
 
-		const meId = authState.creds.me!.id
-		const meLid = authState.creds.me!.lid || authState.creds.me!.id
+		const meId = authState.creds.me.id
+		const meLid = authState.creds.me.lid || authState.creds.me.id
 		const lidattrs = jidDecode(authState.creds.me?.lid)
 		const jlidUser = lidattrs?.user
 		let lids: string
@@ -576,7 +603,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		// Relays seletivos ocultam por padrão a falha de decrypt nos devices que não receberam
 		// o SKDM. O chamador ainda pode usar decryptFailHide:false para observar o placeholder.
 		const shouldHideDecryptFailure =
-			decryptFailHide ?? (!!includeJids?.length || !!excludeJids?.length)
+			decryptFailHide ?? !!includeJids?.length
 
 		let shouldIncludeDeviceIdentity = false
 
@@ -600,530 +627,388 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			devices.push({ user, device, jid: jidNormalizedUser(participant.jid) })
 		}
 
-		await authState.keys.transaction(async () => {
-			const mediaType = getMediaType(message)
-			if (mediaType) {
-				extraAttrs['mediatype'] = mediaType
+		// metadata e devices não tocam chave: buscados antes da transação para não segurá-la durante a rede.
+		// No retry (participant) a metadata não é usada.
+		let groupData: GroupMetadata | undefined
+		let groupDevices: JidWithDevice[] = []
+		let groupDevicesComplete = false
+		if ((isGroup || isStatus) && !participant) {
+			if (isGroup) {
+				groupData = useCachedGroupMetadata && cachedGroupMetadata ? await cachedGroupMetadata(jid) : undefined
+				if (groupData && Array.isArray(groupData.participants)) {
+					logger.trace({ jid, participants: groupData.participants.length }, 'using cached group metadata')
+				} else {
+					groupData = await groupMetadata(jid)
+				}
 			}
 
-			if (isNewsletter) {
-				const patched = patchMessageBeforeSending ? await patchMessageBeforeSending(message, []) : message
-				const bytes = encodeNewsletterMessage(patched as proto.IMessage)
-				binaryNodeContent.push({
-					tag: 'plaintext',
-					attrs: mediaType ? { mediatype: mediaType } : {},
-					content: bytes
-				})
+			const participantsList = groupData ? groupData.participants.map(p => p.lid || p.id) : []
+			if (isStatus && statusJidList) {
+				participantsList.push(...statusJidList)
+			}
+
+			const fetched = await fetchUSyncDevices(participantsList, !!useUserDevicesCache, false)
+			groupDevices = fetched.devices
+			// poda só com a lista de fato completa: lote sem resposta ou metadata vazia apagaria as marcas e o
+			// envio seguinte redistribuiria o SKDM para o grupo inteiro
+			groupDevicesComplete = fetched.complete && participantsList.length > 0
+		}
+
+		const relayInTransaction = () =>
+			authState.keys.transaction(async () => {
+				const mediaType = getMediaType(message)
+				if (mediaType) {
+					extraAttrs['mediatype'] = mediaType
+				}
+
+				if (isNewsletter) {
+					const patched = patchMessageBeforeSending ? await patchMessageBeforeSending(message, []) : message
+					const bytes = encodeNewsletterMessage(patched as proto.IMessage)
+					binaryNodeContent.push({
+						tag: 'plaintext',
+						attrs: mediaType ? { mediatype: mediaType } : {},
+						content: bytes
+					})
+					const stanza: BinaryNode = {
+						tag: 'message',
+						attrs: {
+							to: jid,
+							id: msgId,
+							type: getMessageType(message),
+							...(newsletterMediaId ? { media_id: newsletterMediaId } : {}),
+							...(additionalAttributes || {})
+						},
+						content: binaryNodeContent
+					}
+					logger.debug(
+						{ msgId, mediaType, hasMediaId: !!newsletterMediaId },
+						`sending newsletter message to ${jid}`
+					)
+					await sendNode(stanza)
+					return
+				}
+
+				if (normalizeMessageContent(message)?.pinInChatMessage) {
+					extraAttrs['decrypt-fail'] = 'hide'
+				}
+
+				if (isGroup || isStatus) {
+					// cópia: o objeto do cache não pode ficar marcado se o envio falhar no meio
+					const senderKeyMap: { [jid: string]: boolean } = {}
+					if (!participant && !isStatus) {
+						const result = await authState.keys.get('sender-key-memory', [jid])
+						Object.assign(senderKeyMap, result[jid])
+					}
+
+					let senderKeyMapChanged = false
+
+					if (!participant) {
+						if (!isStatus) {
+							additionalAttributes = {
+								...additionalAttributes,
+								addressing_mode: groupData?.addressingMode || 'pn'
+							}
+						}
+
+						devices.push(...groupDevices)
+						const Mephone = groupDevices.some(d => d.user === jlidUser && d.device === 0)
+						if (!Mephone && jlidUser) {
+							devices.push({ user: jlidUser, device: 0, jid: jidNormalizedUser(meLid) })
+						}
+
+						if (includeJids?.length) {
+							selectiveAllowedUsers = applySelectiveRelayFilter(devices, groupData, {
+								includeJids,
+								meJids: [meId, meLid],
+								jlidUser
+							})
+						}
+					}
+
+					const patched = await patchMessageBeforeSending(message)
+
+					if (Array.isArray(patched)) {
+						throw new Boom('Per-jid patching is not supported in groups')
+					}
+
+					const bytes = encodeWAMessage(patched)
+
+					const { ciphertext, senderKeyDistributionMessage } = await signalRepository.encryptGroupMessage({
+						group: destinationJid,
+						data: bytes,
+						meId: meLid,
+						// POC exclude-relay: se ha exclusao (ou whitelist), rotaciona a sender-key para que quem
+						// ficou de fora (e ja possa ter a chave antiga) nao decifre este skmsg -> ve o stub
+						// "aguardando esta mensagem". Quem esta incluido recebe o SKDM e decifra normal.
+						forceRotate: !!includeJids?.length
+					})
+
+					const senderKeyJids: string[] = []
+					// sender key rotacionada (selective relay) precisa ser redistribuída a todos
+					const skdmToAll = !!includeJids?.length
+					if (skdmToAll && !participant) {
+						// a chave antiga morreu na rotação e o SKDM da nova só vai pros devices que
+						// sobraram no relay seletivo. Sem zerar o map, os de fora continuam marcados
+						// como "já recebeu" e nunca ganham a chave nova => todas as mensagens
+						// seguintes do grupo ficam em "aguardando" pra eles. Zerado, o próximo envio
+						// normal redistribui o SKDM (já na iteração atual, então o skmsg seletivo
+						// continua indecifrável pra quem ficou de fora).
+						for (const key of Object.keys(senderKeyMap)) {
+							delete senderKeyMap[key]
+							senderKeyMapChanged = true
+						}
+					}
+
+					const currentDeviceIds = new Set<string>()
+					for (const { user, device, jid } of devices) {
+						const server = jidDecode(jid)?.server || 'lid'
+						const senderId = jidEncode(user, server, device)
+						currentDeviceIds.add(senderId)
+						// só manda SKDM pra quem ainda não recebeu a sender key;
+						// mandar pra todos em todo envio provoca retry receipt de devices
+						// quebrados a cada mensagem
+						if (!senderKeyMap[senderId] || !!participant || skdmToAll) {
+							senderKeyJids.push(senderId)
+							senderKeyMapChanged = senderKeyMapChanged || !senderKeyMap[senderId]
+							senderKeyMap[senderId] = true
+						}
+					}
+
+					// com a lista completa de devices do grupo, quem saiu sai do mapa; se voltar, recebe o SKDM de novo
+					if (isGroup && !participant && groupDevicesComplete && !includeJids?.length) {
+						for (const key of Object.keys(senderKeyMap)) {
+							if (!currentDeviceIds.has(key)) {
+								delete senderKeyMap[key]
+								senderKeyMapChanged = true
+							}
+						}
+					}
+
+					// if there are some participants with whom the session has not been established
+					// if there are, we re-send the senderkey
+					if (senderKeyJids.length) {
+						logger.debug({ senderKeyJids }, 'sending new sender key')
+
+						const senderKeyMsg: proto.IMessage = {
+							senderKeyDistributionMessage: {
+								axolotlSenderKeyDistributionMessage: senderKeyDistributionMessage,
+								groupId: destinationJid
+							}
+						}
+
+						// sem force: no retry o sendMessagesAgain já renovou a sessão; forçar de novo
+						// sobrescreve a sessão recém-injetada e gasta outra prekey do destinatário
+						await assertSessions(senderKeyJids, false, lids)
+
+						const result = await createParticipantNodes(senderKeyJids, senderKeyMsg, extraAttrs, lids, meId, meLid)
+						shouldIncludeDeviceIdentity = shouldIncludeDeviceIdentity || result.shouldIncludeDeviceIdentity
+						for (const failedJid of result.failedJids) {
+							delete senderKeyMap[failedJid]
+						}
+
+						participants.push(...result.nodes)
+					}
+
+					binaryNodeContent.push({
+						tag: 'enc',
+						attrs: {
+							v: '2',
+							type: 'skmsg',
+							...extraAttrs,
+							...(shouldHideDecryptFailure ? { 'decrypt-fail': 'hide' } : {})
+						},
+						content: ciphertext
+					})
+
+					// só persiste no envio normal e quando mudou; no retry (participant) o map começa vazio
+					// e persistir aqui clobberaria o map completo do grupo
+					if (!participant && !isStatus && senderKeyMapChanged) {
+						await authState.keys.set({ 'sender-key-memory': { [jid]: senderKeyMap } })
+					}
+				} else {
+					const { user: meUser, device: meDevice } = jidDecode(meId)!
+
+					if (!participant) {
+						devices.push({ user, device: 0, jid })
+						if (meDevice !== undefined && meDevice !== 0) {
+							if (isLidUser(jid) && jlidUser) {
+								devices.push({ user: jlidUser, device: 0, jid: jidNormalizedUser(meLid) })
+								const additionalDevices = await getUSyncDevices([jid, meLid], !!useUserDevicesCache, true)
+								devices.push(...additionalDevices)
+							} else {
+								devices.push({ user: meUser, device: 0, jid: jidNormalizedUser(meId) })
+								const additionalDevices = await getUSyncDevices([jid, meId], !!useUserDevicesCache, true)
+								devices.push(...additionalDevices)
+							}
+						}
+					}
+
+					const allJids: string[] = []
+					const meJids: string[] = []
+					const otherJids: string[] = []
+					for (const { user, device, jid } of devices) {
+						const isMe = user === meUser
+						const ismeLid = user === jlidUser
+						const server = jidDecode(jid)?.server || 'lid'
+						const senderId = jidEncode(user, server, device)
+						if (isMe || ismeLid) {
+							meJids.push(senderId)
+						} else {
+							otherJids.push(senderId)
+						}
+						allJids.push(senderId)
+					}
+
+					await assertSessions(allJids, false, lids)
+
+					const meMsg: proto.IMessage = {
+						deviceSentMessage: {
+							destinationJid,
+							message
+						},
+						messageContextInfo: message.messageContextInfo
+					}
+
+					const [
+						{ nodes: meNodes, shouldIncludeDeviceIdentity: s1 },
+						{ nodes: otherNodes, shouldIncludeDeviceIdentity: s2 }
+					] = await Promise.all([
+						createParticipantNodes(meJids, meMsg, extraAttrs, lids, meId, meLid),
+						createParticipantNodes(otherJids, message, extraAttrs, lids, meId, meLid)
+					])
+					// os devices do próprio bot quase sempre cifram: o que importa é o destinatário ter recebido
+					if (otherJids.length && !otherNodes.length) {
+						throw new Boom('All encryptions failed', { statusCode: 500 })
+					}
+
+					participants.push(...meNodes)
+					participants.push(...otherNodes)
+
+					shouldIncludeDeviceIdentity = shouldIncludeDeviceIdentity || s1 || s2
+				}
+
+				if (participants.length) {
+					if (additionalAttributes?.['category'] === 'peer') {
+						const peerNode = participants[0]?.content?.[0] as BinaryNode
+						if (peerNode) {
+							binaryNodeContent.push(peerNode) // push only enc
+						}
+					} else {
+						binaryNodeContent.push({
+							tag: 'participants',
+							attrs: {},
+							content: participants
+						})
+					}
+				}
+
 				const stanza: BinaryNode = {
 					tag: 'message',
 					attrs: {
-						to: jid,
 						id: msgId,
 						type: getMessageType(message),
-						...(newsletterMediaId ? { media_id: newsletterMediaId } : {}),
 						...(additionalAttributes || {})
 					},
 					content: binaryNodeContent
 				}
-				logger.debug(
-					{ msgId, mediaType, hasMediaId: !!newsletterMediaId },
-					`sending newsletter message to ${jid}`
-				)
-				await sendNode(stanza)
-				return
-			}
-
-			if (normalizeMessageContent(message)?.pinInChatMessage) {
-				extraAttrs['decrypt-fail'] = 'hide'
-			}
-
-			if (isGroup || isStatus) {
-				const [groupData, senderKeyMap] = await Promise.all([
-					(async () => {
-						let groupData = useCachedGroupMetadata && cachedGroupMetadata ? await cachedGroupMetadata(jid) : undefined
-						if (groupData && Array.isArray(groupData?.participants)) {
-							logger.trace({ jid, participants: groupData.participants.length }, 'using cached group metadata')
-						} else if (!isStatus) {
-							groupData = await groupMetadata(jid)
-						}
-
-						return groupData
-					})(),
-					(async () => {
-						if (!participant && !isStatus) {
-							const result = await authState.keys.get('sender-key-memory', [jid])
-							return result[jid] || {}
-						}
-
-						return {}
-					})()
-				])
-
-				if (!participant) {
-					const participantsList = groupData && !isStatus ? groupData.participants.map(p => p.lid || p.id) : []
-					if (isStatus && statusJidList) {
-						participantsList.push(...statusJidList)
-					}
-
-					if (!isStatus) {
-						additionalAttributes = {
-							...additionalAttributes,
-							addressing_mode: groupData?.addressingMode || 'pn'
-						}
-					}
-
-					const additionalDevices = await getUSyncDevices(participantsList, !!useUserDevicesCache, false)
-					devices.push(...additionalDevices)
-					const Mephone = additionalDevices.some(d => d.user === jlidUser && d.device === 0)
-					if (!Mephone && jlidUser) {
-						devices.push({ user: jlidUser, device: 0, jid: jidNormalizedUser(meLid) })
-					}
-
-					// POC exclude-relay (inverso): whitelist. Mantem SOMENTE os devices dos usuarios em
-					// includeJids (mais o proprio remetente, para seus devices sincronizarem); todos os
-					// demais sao removidos => nao recebem sender-key => veem o stub. Precede excludeJids.
-					if (includeJids?.length) {
-						const includeUsers = new Set<string>()
-						// remetente sempre incluido (phone + lid), senao o proprio bot nao le a mensagem
-						for (const meJid of [meId, meLid]) {
-							const meUserDec = jidDecode(jidNormalizedUser(meJid))?.user
-							if (meUserDec) {
-								includeUsers.add(meUserDec)
-							}
-						}
-						if (jlidUser) {
-							includeUsers.add(jlidUser)
-						}
-						for (const inc of includeJids) {
-							const incNorm = jidNormalizedUser(inc)
-							const incUser = jidDecode(incNorm)?.user
-							if (incUser) {
-								includeUsers.add(incUser)
-							}
-							for (const p of groupData?.participants || []) {
-								const pid = (p as { id?: string; lid?: string }).id
-								const plid = (p as { id?: string; lid?: string }).lid
-								if (areJidsSameUser(pid, incNorm) || (plid && areJidsSameUser(plid, incNorm))) {
-									const uid = pid ? jidDecode(pid)?.user : undefined
-									const ulid = plid ? jidDecode(plid)?.user : undefined
-									if (uid) {
-										includeUsers.add(uid)
-									}
-									if (ulid) {
-										includeUsers.add(ulid)
-									}
-								}
-							}
-						}
-						selectiveAllowedUsers = new Set(includeUsers)
-						for (let i = devices.length - 1; i >= 0; i--) {
-							if (!devices[i].user || !includeUsers.has(devices[i].user)) {
-								devices.splice(i, 1)
-							}
-						}
-						logger.info(
-							{ includeUsers: [...includeUsers], remaining: devices.length },
-							'exclude-relay: whitelist aplicada (apenas includeJids + remetente recebem sender-key)'
-						)
-					} else if (excludeJids?.length) {
-						// POC exclude-relay: remove TODOS os devices dos usuarios em excludeJids (ex.: admins),
-						// resolvendo phone<->lid via participantes do grupo. Sem device no <participants> => sem
-						// sender-key => nao decifram o skmsg => a mensagem simplesmente nao aparece pra eles.
-						const excludeUsers = new Set<string>()
-						for (const ex of excludeJids) {
-							const exNorm = jidNormalizedUser(ex)
-							const exUser = jidDecode(exNorm)?.user
-							if (exUser) {
-								excludeUsers.add(exUser)
-							}
-							for (const p of groupData?.participants || []) {
-								const pid = (p as { id?: string; lid?: string }).id
-								const plid = (p as { id?: string; lid?: string }).lid
-								if (areJidsSameUser(pid, exNorm) || (plid && areJidsSameUser(plid, exNorm))) {
-									const uid = pid ? jidDecode(pid)?.user : undefined
-									const ulid = plid ? jidDecode(plid)?.user : undefined
-									if (uid) {
-										excludeUsers.add(uid)
-									}
-									if (ulid) {
-										excludeUsers.add(ulid)
-									}
-								}
-							}
-						}
-						selectiveAllowedUsers = new Set<string>()
-						for (const groupParticipant of groupData?.participants || []) {
-							const pid = (groupParticipant as { id?: string; lid?: string }).id
-							const plid = (groupParticipant as { id?: string; lid?: string }).lid
-							const pidUser = pid ? jidDecode(pid)?.user : undefined
-							const plidUser = plid ? jidDecode(plid)?.user : undefined
-							if (
-								(pidUser && excludeUsers.has(pidUser)) ||
-								(plidUser && excludeUsers.has(plidUser))
-							) {
-								continue
-							}
-							if (pidUser) selectiveAllowedUsers.add(pidUser)
-							if (plidUser) selectiveAllowedUsers.add(plidUser)
-						}
-						// Os próprios devices do remetente sempre recebem a sender-key.
-						for (const meJid of [meId, meLid]) {
-							const meUser = jidDecode(jidNormalizedUser(meJid))?.user
-							if (meUser) selectiveAllowedUsers.add(meUser)
-						}
-						for (let i = devices.length - 1; i >= 0; i--) {
-							if (devices[i].user && excludeUsers.has(devices[i].user)) {
-								devices.splice(i, 1)
-							}
-						}
-						logger.info(
-							{ excludeUsers: [...excludeUsers], remaining: devices.length },
-							'exclude-relay: devices filtrados (usuarios excluidos nao recebem sender-key)'
-						)
-					}
-				}
-
-				const patched = await patchMessageBeforeSending(message)
-
-				if (Array.isArray(patched)) {
-					throw new Boom('Per-jid patching is not supported in groups')
-				}
-
-				const bytes = encodeWAMessage(patched)
-
-				const { ciphertext, senderKeyDistributionMessage } = await signalRepository.encryptGroupMessage({
-					group: destinationJid,
-					data: bytes,
-					meId: meLid,
-					// POC exclude-relay: se ha exclusao (ou whitelist), rotaciona a sender-key para que quem
-					// ficou de fora (e ja possa ter a chave antiga) nao decifre este skmsg -> ve o stub
-					// "aguardando esta mensagem". Quem esta incluido recebe o SKDM e decifra normal.
-					forceRotate: !!excludeJids?.length || !!includeJids?.length
-				})
-
-				const senderKeyJids: string[] = []
-				// sender key rotacionada (selective relay) precisa ser redistribuída a todos
-				const skdmToAll = !!excludeJids?.length || !!includeJids?.length
-				if (skdmToAll && !participant) {
-					// a chave antiga morreu na rotação e o SKDM da nova só vai pros devices que
-					// sobraram no relay seletivo. Sem zerar o map, os de fora continuam marcados
-					// como "já recebeu" e nunca ganham a chave nova => todas as mensagens
-					// seguintes do grupo ficam em "aguardando" pra eles. Zerado, o próximo envio
-					// normal redistribui o SKDM (já na iteração atual, então o skmsg seletivo
-					// continua indecifrável pra quem ficou de fora).
-					for (const key of Object.keys(senderKeyMap)) {
-						delete senderKeyMap[key]
-					}
-				}
-
-				for (const { user, device, jid } of devices) {
-					const server = jidDecode(jid)?.server || 'lid'
-					const senderId = jidEncode(user, server, device)
-					// só manda SKDM pra quem ainda não recebeu a sender key;
-					// mandar pra todos em todo envio provoca retry receipt de devices
-					// quebrados a cada mensagem
-					if (!senderKeyMap[senderId] || !!participant || skdmToAll) {
-						senderKeyJids.push(senderId)
-						senderKeyMap[senderId] = true
-					}
-				}
-
-				// if there are some participants with whom the session has not been established
-				// if there are, we re-send the senderkey
-				if (senderKeyJids.length) {
-					logger.debug({ senderKeyJids }, 'sending new sender key')
-
-					const senderKeyMsg: proto.IMessage = {
-						senderKeyDistributionMessage: {
-							axolotlSenderKeyDistributionMessage: senderKeyDistributionMessage,
-							groupId: destinationJid
-						}
-					}
-
-					await assertSessions(senderKeyJids, isretry ? true : false, lids)
-
-					const result = await createParticipantNodes(senderKeyJids, senderKeyMsg, extraAttrs, lids, meId, meLid)
-					shouldIncludeDeviceIdentity = shouldIncludeDeviceIdentity || result.shouldIncludeDeviceIdentity
-
-					participants.push(...result.nodes)
-				}
-
-				binaryNodeContent.push({
-					tag: 'enc',
-					attrs: {
-						v: '2',
-						type: 'skmsg',
-						...extraAttrs,
-						...(shouldHideDecryptFailure ? { 'decrypt-fail': 'hide' } : {})
-					},
-					content: ciphertext
-				})
-
-				// só persiste no envio normal; no retry (participant) o map começa vazio
-				// e persistir aqui clobberaria o map completo do grupo
-				if (!participant) {
-					await authState.keys.set({ 'sender-key-memory': { [jid]: senderKeyMap } })
-				}
-			} else {
-				const { user: meUser, device: meDevice } = jidDecode(meId)!
-
-				if (!participant) {
-					devices.push({ user, device: 0, jid })
-					if (meDevice !== undefined && meDevice !== 0) {
-						if (isLidUser(jid) && jlidUser) {
-							devices.push({ user: jlidUser, device: 0, jid: jidNormalizedUser(meLid) })
-							const additionalDevices = await getUSyncDevices([jid, meLid], !!useUserDevicesCache, true)
-							devices.push(...additionalDevices)
-						} else {
-							devices.push({ user: meUser, device: 0, jid: jidNormalizedUser(meId) })
-							const additionalDevices = await getUSyncDevices([jid, meId], !!useUserDevicesCache, true)
-							devices.push(...additionalDevices)
-						}
-					}
-				}
-
-				const allJids: string[] = []
-				const meJids: string[] = []
-				const otherJids: string[] = []
-				for (const { user, device, jid } of devices) {
-					const isMe = user === meUser
-					const ismeLid = user === jlidUser
-					const server = jidDecode(jid)?.server || 'lid'
-					const senderId = jidEncode(user, server, device)
-					if (isMe || ismeLid) {
-						meJids.push(senderId)
+				// if the participant to send to is explicitly specified (generally retry recp)
+				// ensure the message is only sent to that person
+				// if a retry receipt is sent to everyone -- it'll fail decryption for everyone else who received the msg
+				if (participant) {
+					if (isJidGroup(destinationJid)) {
+						stanza.attrs.to = destinationJid
+						stanza.attrs.participant = participant.jid
+					} else if (areJidsSameUser(participant.jid, meId)) {
+						stanza.attrs.to = participant.jid
+						stanza.attrs.recipient = destinationJid
 					} else {
-						otherJids.push(senderId)
-					}
-					allJids.push(senderId)
-				}
-
-				await assertSessions(allJids, isretry ? true : false, lids)
-
-				const meMsg: proto.IMessage = {
-					deviceSentMessage: {
-						destinationJid,
-						message
-					},
-					messageContextInfo: message.messageContextInfo
-				}
-
-				const [
-					{ nodes: meNodes, shouldIncludeDeviceIdentity: s1 },
-					{ nodes: otherNodes, shouldIncludeDeviceIdentity: s2 }
-				] = await Promise.all([
-					createParticipantNodes(meJids, meMsg, extraAttrs, lids, meId, meLid),
-					createParticipantNodes(otherJids, message, extraAttrs, lids, meId, meLid)
-				])
-				participants.push(...meNodes)
-				participants.push(...otherNodes)
-
-				shouldIncludeDeviceIdentity = shouldIncludeDeviceIdentity || s1 || s2
-			}
-
-			if (participants.length) {
-				if (additionalAttributes?.['category'] === 'peer') {
-					const peerNode = participants[0]?.content?.[0] as BinaryNode
-					if (peerNode) {
-						binaryNodeContent.push(peerNode) // push only enc
+						stanza.attrs.to = participant.jid
 					}
 				} else {
-					binaryNodeContent.push({
-						tag: 'participants',
-						attrs: {},
-						content: participants
-					})
-				}
-			}
-
-			const stanza: BinaryNode = {
-				tag: 'message',
-				attrs: {
-					id: msgId,
-					type: getMessageType(message),
-					...(additionalAttributes || {})
-				},
-				content: binaryNodeContent
-			}
-			// if the participant to send to is explicitly specified (generally retry recp)
-			// ensure the message is only sent to that person
-			// if a retry receipt is sent to everyone -- it'll fail decryption for everyone else who received the msg
-			if (participant) {
-				if (isJidGroup(destinationJid)) {
 					stanza.attrs.to = destinationJid
-					stanza.attrs.participant = participant.jid
-				} else if (areJidsSameUser(participant.jid, meId)) {
-					stanza.attrs.to = participant.jid
-					stanza.attrs.recipient = destinationJid
-				} else {
-					stanza.attrs.to = participant.jid
 				}
-			} else {
-				stanza.attrs.to = destinationJid
-			}
 
-			if (shouldIncludeDeviceIdentity) {
-				;(stanza.content as BinaryNode[]).push({
-					tag: 'device-identity',
-					attrs: {},
-					content: encodeSignedDeviceIdentity(authState.creds.account!, true)
+				if (shouldIncludeDeviceIdentity) {
+					;(stanza.content as BinaryNode[]).push({
+						tag: 'device-identity',
+						attrs: {},
+						content: encodeSignedDeviceIdentity(authState.creds.account!, true)
+					})
+
+					logger.debug({ jid }, 'adding device identity')
+				}
+
+				const { is1on1Send, tcTokenJid } = await appendPrivacyToken(stanza, {
+					destinationJid,
+					isGroup,
+					isStatus,
+					isNewsletter,
+					isPeer: additionalAttributes?.['category'] === 'peer',
+					isRetry: !!isretry,
+					participantJid: participant?.jid,
+					meIds: [meId, meLid]
 				})
 
-				logger.debug({ jid }, 'adding device identity')
-			}
-
-			const isPeerMessage = additionalAttributes?.['category'] === 'peer'
-			const privacyTokenIntent = resolvePrivacyTokenIntent({
-				isUserDestination: !!(isJidUser(destinationJid) || isLidUser(destinationJid)),
-				isGroup,
-				isStatus,
-				isNewsletter,
-				isPeer: isPeerMessage,
-				isRetry: !!isretry,
-				hasParticipant: !!participant,
-				isSelfParticipant:
-					!!participant &&
-					(areJidsSameUser(participant.jid, meId) || areJidsSameUser(participant.jid, meLid))
-			})
-			const is1on1Send = privacyTokenIntent === 'send'
-			const tcTokenJid = privacyTokenIntent !== 'none' ? tcTokenStorageJid(destinationJid) : undefined
-			let tcTokenEntry: SignalDataTypeMap['tctoken'] | undefined
-			let tcTokenReadFailed = false
-			if (tcTokenJid) {
-				try {
-					tcTokenEntry = (await authState.keys.get('tctoken', [tcTokenJid]))[tcTokenJid]
-				} catch (err) {
-					tcTokenReadFailed = true
-					logger.debug({ jid: destinationJid, err: (err as Error)?.message }, 'falha ao ler tctoken')
+				if (additionalNodes && additionalNodes.length > 0) {
+					;(stanza.content as BinaryNode[]).push(...additionalNodes)
 				}
-			}
 
-			let tcTokenBuffer: Buffer | undefined = tcTokenEntry?.token
-			let tcTokenState: 'missing' | 'awaiting_recipient' | 'ready' | 'expired' = tcTokenEntry
-				? tcTokenBuffer?.length
-					? 'ready'
-					: tcTokenEntry.senderTimestamp !== undefined
-						? 'awaiting_recipient'
-						: 'missing'
-				: 'missing'
-			if (tcTokenBuffer?.length && isTcTokenExpired(tcTokenEntry?.timestamp)) {
-				logger.debug({ jid: destinationJid, timestamp: tcTokenEntry?.timestamp }, 'tctoken expired, clearing')
-				tcTokenBuffer = undefined
-				tcTokenState = 'expired'
-				const cleared =
-					tcTokenEntry?.senderTimestamp !== undefined
-						? { token: Buffer.alloc(0), senderTimestamp: tcTokenEntry.senderTimestamp }
-						: null
-				try {
-					await authState.keys.set({ tctoken: { [tcTokenJid!]: cleared } })
-				} catch {}
-			}
-			if (tcTokenBuffer?.length) {
-				;(stanza.content as BinaryNode[]).push({
-					tag: 'tctoken',
-					attrs: {},
-					content: tcTokenBuffer
-				})
-				logger.info(
-					{
-						event: 'privacy_token_outgoing_message',
-						msgId: stanza.attrs.id,
-						recipient: jidNormalizedUser(destinationJid),
-						storageJid: tcTokenJid,
-						privacyTokenType: 'tctoken',
-						tcTokenState,
-						isretry: !!isretry
-					},
-					'mensagem 1:1 protegida por tctoken'
-				)
-			} else if (tcTokenJid) {
-				const csTokenResult = await buildCsTokenForJid(destinationJid)
-				if (csTokenResult.token?.length) {
-					;(stanza.content as BinaryNode[]).push({ tag: 'cstoken', attrs: {}, content: csTokenResult.token })
+				const hasCustomBizNode = additionalNodes?.some(node => node.tag === 'biz')
+				const bizNode = hasCustomBizNode ? undefined : getBusinessNode(message)
+				if (bizNode) {
+					;(stanza.content as BinaryNode[]).push(bizNode)
+					logger.debug({ jid }, 'adding business node')
+				}
+
+				logger.debug({ msgId }, `sending message to ${participants.length} devices`)
+				if (pocRelayTrace && (isGroup || participant)) {
 					logger.info(
 						{
-							event: 'privacy_token_outgoing_message',
-							msgId: stanza.attrs.id,
-							recipient: jidNormalizedUser(destinationJid),
-							storageJid: tcTokenJid,
-							privacyTokenType: 'cstoken',
-							tcTokenReadFailed,
-							tcTokenState,
-							isretry: !!isretry
+							msgId,
+							to: stanza.attrs.to,
+							participant: stanza.attrs.participant,
+							isretry: !!isretry,
+							participantNodes: participants.length,
+							deviceCandidates: devices.length,
+							contentTags: Array.isArray(stanza.content) ? stanza.content.map(node => node.tag) : [],
+							hasSkmsg: binaryNodeContent.some(
+								node => node.tag === 'enc' && node.attrs.type === 'skmsg'
+							),
+							includeCount: includeJids?.length || 0,
+							decryptFailHide: shouldHideDecryptFailure
 						},
-						'mensagem 1:1 protegida por cstoken'
-					)
-				} else {
-					logger.warn(
-						{
-							event: 'privacy_token_outgoing_message',
-							msgId: stanza.attrs.id,
-							recipient: jidNormalizedUser(destinationJid),
-							storageJid: tcTokenJid,
-							privacyTokenType: 'none',
-							reason: csTokenResult.reason,
-							tcTokenReadFailed,
-							tcTokenState,
-							isretry: !!isretry
-						},
-						'mensagem 1:1 sem privacy token'
+						'[POC relay trace] outbound stanza'
 					)
 				}
-			}
 
-			if (additionalNodes && additionalNodes.length > 0) {
-				;(stanza.content as BinaryNode[]).push(...additionalNodes)
-			}
-
-			const hasCustomBizNode = additionalNodes?.some(node => node.tag === 'biz')
-			const bizNode = hasCustomBizNode ? undefined : getBusinessNode(message)
-			if (bizNode) {
-				;(stanza.content as BinaryNode[]).push(bizNode)
-				logger.debug({ jid }, 'adding business node')
-			}
-
-			logger.debug({ msgId }, `sending message to ${participants.length} devices`)
-			if (pocRelayTrace && (isGroup || participant)) {
-				logger.info(
-					{
-						msgId,
-						to: stanza.attrs.to,
-						participant: stanza.attrs.participant,
-						isretry: !!isretry,
-						participantNodes: participants.length,
-						deviceCandidates: devices.length,
-						contentTags: Array.isArray(stanza.content) ? stanza.content.map(node => node.tag) : [],
-						hasSkmsg: binaryNodeContent.some(
-							node => node.tag === 'enc' && node.attrs.type === 'skmsg'
-						),
-						excludeCount: excludeJids?.length || 0,
-						includeCount: includeJids?.length || 0,
+				await sendNode(stanza)
+				if (isGroup && !participant && selectiveAllowedUsers) {
+					const selectiveCacheKey = `${destinationJid}:${msgId}`
+					selectiveRelayCache.set(selectiveCacheKey, {
+						groupJid: destinationJid,
+						allowedUsers: [...selectiveAllowedUsers],
 						decryptFailHide: shouldHideDecryptFailure
-					},
-					'[POC relay trace] outbound stanza'
-				)
-			}
+					})
+					selectiveMessageCache.set(selectiveCacheKey, message)
+				}
 
-			await sendNode(stanza)
-			if (isGroup && !participant && selectiveAllowedUsers) {
-				const selectiveCacheKey = `${destinationJid}:${msgId}`
-				selectiveRelayCache.set(selectiveCacheKey, {
-					groupJid: destinationJid,
-					allowedUsers: [...selectiveAllowedUsers],
-					decryptFailHide: shouldHideDecryptFailure
-				})
-				selectiveMessageCache.set(selectiveCacheKey, message)
-			}
+				if (is1on1Send && tcTokenJid) {
+					void maybeIssueTcToken(destinationJid, message, {
+						participant,
+						additionalAttributes,
+						storageJid: tcTokenJid,
+						msgId: stanza.attrs.id
+					})
+				}
+			})
 
-			if (is1on1Send && tcTokenJid) {
-				void maybeIssueTcToken(destinationJid, message, {
-					participant,
-					additionalAttributes,
-					storageJid: tcTokenJid,
-					msgId: stanza.attrs.id
-				})
-			}
-		})
+		// envios ao mesmo grupo em série: o segundo via os devices novos como "já receberam" o SKDM do
+		// primeiro, que ainda estava cifrando, e chegava antes dele sem a chave (retry no destinatário)
+		if (isGroup && !participant) {
+			await groupRelayMutex.mutex(jid, relayInTransaction)
+		} else {
+			await relayInTransaction()
+		}
 
 		return msgId
 	}
@@ -1263,14 +1148,6 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		if (!buttonType) {
 			return
 		}
-		if (!content.listMessage) {
-			return {
-				tag: 'biz',
-				attrs: {},
-				content: [{ tag: buttonType, attrs: getButtonArgs(content) }]
-			}
-		}
-
 		return {
 			tag: 'biz',
 			attrs: {},
@@ -1283,161 +1160,6 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		}
 	}
 
-	async function maybeIssueTcToken(
-		jid: string,
-		message: proto.IMessage,
-		options: {
-			participant?: MessageRelayOptions['participant']
-			additionalAttributes?: BinaryNodeAttributes
-			storageJid: string
-			msgId: string
-		}
-	) {
-		try {
-			if (options.participant || options.additionalAttributes?.['category'] === 'peer') return
-			if (normalizeMessageContent(message)?.protocolMessage) return
-
-			const current = await authState.keys.get('tctoken', [options.storageJid])
-			if (!shouldSendNewTcToken(current[options.storageJid]?.senderTimestamp)) return
-			if (inFlightTcTokenIssuance.has(options.storageJid)) return
-			if (!tcTokenIssuanceSemaphore.tryAcquire()) return
-
-			inFlightTcTokenIssuance.add(options.storageJid)
-			const issueTimestamp = unixTimestampSeconds()
-			try {
-				const result = await getPrivacyTokens([jid], issueTimestamp)
-				const storedJids = await storeTcTokensFromIqResult({
-					result,
-					fallbackJid: options.storageJid,
-					keys: authState.keys,
-					resolveLid: getLidForPn,
-					onNewJidStored: trackTcTokenJid
-				})
-				const afterEntry = (await authState.keys.get('tctoken', [options.storageJid]))[options.storageJid]
-				const recipientTokenStored = storedJids.includes(options.storageJid)
-				const recipientTokenPresent = !!afterEntry?.token?.length
-				await authState.keys.set({
-					tctoken: {
-						[options.storageJid]: {
-							...afterEntry,
-							token: afterEntry?.token ?? Buffer.alloc(0),
-							senderTimestamp: issueTimestamp
-						}
-					}
-				})
-				trackTcTokenJid(options.storageJid)
-				logger.info(
-					{
-						event: 'tc_token_issued',
-						msgId: options.msgId,
-						recipient: jidNormalizedUser(jid),
-						storageJid: options.storageJid,
-						recipientTokenStored,
-						recipientTokenPresent
-					},
-					recipientTokenStored
-						? 'tc token emitido e token do destinatário persistido'
-						: recipientTokenPresent
-							? 'tc token emitido; token existente preservado'
-							: 'tc token emitido; aguardando token do destinatário'
-				)
-			} finally {
-				inFlightTcTokenIssuance.delete(options.storageJid)
-				tcTokenIssuanceSemaphore.release()
-			}
-		} catch (err) {
-			logger.debug({ jid, err: (err as Error)?.message }, 'falha ao emitir tctoken')
-		}
-	}
-
-	/**
-	 * Quando o contato troca de identidade Signal, o token que emitimos pra ele deixa de valer.
-	 * Reemite reusando o senderTimestamp armazenado, pra não avançar o bucket de emissão.
-	 */
-	async function reissueTcTokenAfterIdentityChange(jid: string) {
-		try {
-			// só a identidade do device primário conta; companion trocando de chave não invalida o token
-			if (jidDecode(jid)?.device) return
-			// troca da nossa própria identidade não é reach-out: não há token nosso pra reemitir
-			if (
-				areJidsSameUser(jid, authState.creds.me?.id) ||
-				areJidsSameUser(jid, authState.creds.me?.lid)
-			) {
-				return
-			}
-
-			if (!isRegularUser(jidNormalizedUser(jid))) return
-
-			const storageJid = tcTokenStorageJid(jid)
-			const entry = (await authState.keys.get('tctoken', [storageJid]))[storageJid]
-			const senderTimestamp = entry?.senderTimestamp
-			// nunca emitimos pra esse contato, ou a janela do emissor já expirou: nada a reemitir
-			if (senderTimestamp === undefined || isTcTokenExpired(senderTimestamp)) return
-			if (inFlightTcTokenIssuance.has(storageJid)) return
-
-			inFlightTcTokenIssuance.add(storageJid)
-			try {
-				// espera vaga em vez de desistir: reemissão não tem segunda chance, ao contrário
-				// da emissão pós-envio, que a próxima mensagem repete
-				await tcTokenIssuanceSemaphore.acquire()
-				try {
-					const result = await getPrivacyTokens([jid], senderTimestamp)
-					const storedJids = await storeTcTokensFromIqResult({
-						result,
-						fallbackJid: storageJid,
-						keys: authState.keys,
-						resolveLid: getLidForPn,
-						onNewJidStored: trackTcTokenJid
-					})
-					logger.info(
-						{
-							event: 'tc_token_reissued_identity_change',
-							recipient: jidNormalizedUser(jid),
-							storageJid,
-							senderTimestamp,
-							recipientTokenStored: storedJids.includes(storageJid)
-						},
-						'tc token reemitido após troca de identidade'
-					)
-				} finally {
-					tcTokenIssuanceSemaphore.release()
-				}
-			} finally {
-				inFlightTcTokenIssuance.delete(storageJid)
-			}
-		} catch (err) {
-			logger.debug({ jid, err: (err as Error)?.message }, 'falha ao reemitir tctoken após troca de identidade')
-		}
-	}
-
-	const getPrivacyTokens = async (jids: string[], timestamp?: number) => {
-		const t = (timestamp ?? unixTimestampSeconds()).toString()
-		const result = await query({
-			tag: 'iq',
-			attrs: {
-				to: S_WHATSAPP_NET,
-				type: 'set',
-				xmlns: 'privacy'
-			},
-			content: [
-				{
-					tag: 'tokens',
-					attrs: {},
-					content: jids.map(jid => ({
-						tag: 'token',
-						attrs: {
-							jid: jidNormalizedUser(jid),
-							t,
-							type: 'trusted_contact'
-						}
-					}))
-				}
-			]
-		})
-
-		return result
-	}
-
 	const waUploadToServer = getWAUploadToServer(config, refreshMediaConn)
 
 	const waitForMsgMediaUpdate = bindWaitForEvent(ev, 'messages.media-update')
@@ -1446,6 +1168,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		...sock,
 		getPrivacyTokens,
 		reissueTcTokenAfterIdentityChange,
+		scheduleTcTokenPrune,
+		cancelTcTokenPrune,
 		getLidForPn,
 		cacheLidMapping,
 		tcTokenStorageJid,
@@ -1463,6 +1187,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		sendPeerDataOperationMessage,
 		createParticipantNodes,
 		getUSyncDevices,
+		userDevicesCache,
 		getSelectiveRelayContext: (groupJid: string, messageId: string) =>
 			selectiveRelayCache.get(`${groupJid}:${messageId}`),
 		getSelectiveSentMessage: (groupJid: string, messageId: string) =>
@@ -1583,7 +1308,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				}
 
 				if ('cachedGroupMetadata' in options) {
-					console.warn(
+					logger.warn(
 						'cachedGroupMetadata in sendMessage are deprecated, now cachedGroupMetadata is part of the socket config.'
 					)
 				}
@@ -1593,184 +1318,24 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					// Relays seletivos não podem depender de metadata/devices antigos: um device
 					// recém-vinculado receberia o skmsg sem o respectivo SKDM.
 					useCachedGroupMetadata:
-						options.includeJids?.length || options.excludeJids?.length
-							? false
-							: options.useCachedGroupMetadata,
+						options.includeJids?.length ? false : options.useCachedGroupMetadata,
 					useUserDevicesCache:
-						options.includeJids?.length || options.excludeJids?.length
-							? false
-							: options.useUserDevicesCache,
+						options.includeJids?.length ? false : options.useUserDevicesCache,
 					additionalAttributes,
 					statusJidList: options.statusJidList,
 					newsletterMediaId,
 					additionalNodes,
-					excludeJids: options.excludeJids,
 					includeJids: options.includeJids,
 					decryptFailHide: options.decryptFailHide
 				})
 				if (config.emitOwnEvents) {
 					process.nextTick(() => {
-						processingMutex.mutex(() => upsertMessage(fullMsg, 'append'))
+						emitOwnMessage(fullMsg)
 					})
 				}
 
 				return fullMsg
 			}
-		},
-		/**
-		 * Envia uma mensagem em grupo apenas para um participante (targetJid).
-		 * Só o target recebe a mensagem; os demais podem ver "aguardando esta mensagem".
-		 * Deve ser usada apenas para grupos.
-		 *
-		 * @param jid - JID do grupo (g.us)
-		 * @param messageObject - Conteúdo da mensagem (só entregue ao targetJid)
-		 * @param options - Opções incluindo targetJid e targetOnly0Device
-		 */
-		sendSecretGroupMessage: async (
-			jid: string,
-			messageObject: AnyMessageContent,
-			options: SecretGroupMessageOptions = {} as SecretGroupMessageOptions
-		) => {
-			if (!isJidGroup(jid)) {
-				throw new Boom('sendSecretGroupMessage deve ser usada apenas para grupos (g.us)', { statusCode: 400 })
-			}
-			const targetJid = options.targetJid
-			if (!targetJid) {
-				throw new Boom('options.targetJid é obrigatório em sendSecretGroupMessage', { statusCode: 400 })
-			}
-
-			const { targetJid: _targetJid, targetOnly0Device: _targetOnly0Device, ...messageGenOptions } = options
-			const targetOnly0Device = options.targetOnly0Device === true
-			const userJid = authState.creds.me!.id
-			const meLid = authState.creds.me!.lid || authState.creds.me!.id
-			const jlidUser = jidDecode(authState.creds.me?.lid)?.user
-			const useUserDevicesCache = options.useUserDevicesCache !== false
-			const useCachedGroupMetadata = options.useCachedGroupMetadata !== false
-			const additionalAttributes: BinaryNodeAttributes = options.additionalAttributes || {}
-			const additionalNodes: BinaryNode[] = options.additionalNodes || []
-
-			const groupData = useCachedGroupMetadata && cachedGroupMetadata ? await cachedGroupMetadata(jid) : undefined
-			const resolvedGroupData =
-				groupData && Array.isArray(groupData?.participants) ? groupData : await groupMetadata(jid)
-
-			const participantsList = resolvedGroupData.participants
-				.map((p: { lid?: string; id?: string; jid?: string }) => p.lid || p.id)
-				.filter((jid): jid is string => !!jid)
-
-			// Resolver targetJid para o(s) jid(s) do participante no grupo (LID ou id), pois o grupo pode usar LID
-			const normalizedTarget = jidNormalizedUser(targetJid)
-			const targetParticipantJids = new Set<string>()
-			for (const p of resolvedGroupData.participants) {
-				const pid = (p as { id?: string; lid?: string; jid?: string }).id
-				const plid = (p as { id?: string; lid?: string; jid?: string }).lid
-				const pjid = (p as { id?: string; lid?: string; jid?: string }).jid
-				const matches =
-					areJidsSameUser(pid, normalizedTarget) ||
-					(plid ? areJidsSameUser(plid, normalizedTarget) : false) ||
-					(pjid ? areJidsSameUser(pjid, normalizedTarget) : false)
-				if (matches) {
-					const j = plid || pid
-					if (j) targetParticipantJids.add(jidNormalizedUser(j))
-				}
-			}
-			logger.debug(
-				{ targetJid: normalizedTarget, targetParticipantJids: [...targetParticipantJids] },
-				'sendSecretGroupMessage: target resolved'
-			)
-
-			const additionalDevices = await getUSyncDevices(participantsList, useUserDevicesCache, false)
-			const devices: JidWithDevice[] = [...additionalDevices]
-			const mePhone = additionalDevices.some((d: JidWithDevice) => d.user === jlidUser && (d.device ?? 0) === 0)
-			if (!mePhone && jlidUser) {
-				devices.push({ user: jlidUser, device: 0, jid: jidNormalizedUser(meLid) })
-			}
-
-			const messageId = options.messageId || generateMessageIDV2(sock.user?.id)
-			const messageIdReal = generateMessageIDV2(sock.user?.id)
-
-			const targetDeviceJids: string[] = []
-			for (const d of devices) {
-				const server = jidDecode(d.jid)?.server || 'lid'
-				const deviceNum = d.device ?? 0
-				const fullDeviceJid = jidEncode(d.user, server as 'lid' | 's.whatsapp.net', deviceNum)
-				const deviceParticipantJid = d.jid ? jidNormalizedUser(d.jid) : ''
-				const isTarget =
-					!!deviceParticipantJid &&
-					targetParticipantJids.has(deviceParticipantJid) &&
-					(!targetOnly0Device || deviceNum === 0)
-				if (isTarget) targetDeviceJids.push(fullDeviceJid)
-			}
-
-			// Placeholder (mensagem vazia) para o grupo com messageId; sem isso o servidor não exibe a mensagem.
-			const placeholderMsg = await generateWAMessage(
-				jid,
-				{ text: '\u200B' },
-				{
-					logger,
-					userJid,
-					getUrlInfo: async () => undefined,
-					getProfilePicUrl: sock.profilePictureUrl,
-					upload: waUploadToServer,
-					mediaCache: config.mediaCache,
-					options: config.options,
-					messageId,
-					...messageGenOptions
-				}
-			)
-			await relayMessage(jid, placeholderMsg.message!, {
-				messageId,
-				useCachedGroupMetadata: true,
-				useUserDevicesCache: true,
-				additionalAttributes,
-				additionalNodes
-			})
-
-			// Mensagem real só para o target, com outro messageId para de fato chegar (o cliente não substitui pelo mesmo id).
-			const fullMsgReal = await generateWAMessage(jid, messageObject, {
-				logger,
-				userJid,
-				getUrlInfo: (text: string) =>
-					getUrlInfo(text, {
-						thumbnailWidth: linkPreviewImageThumbnailWidth,
-						fetchOpts: { timeout: 3_000, ...(axiosOptions || {}) },
-						logger,
-						uploadImage: generateHighQualityLinkPreview ? waUploadToServer : undefined
-					}),
-				getProfilePicUrl: sock.profilePictureUrl,
-				upload: waUploadToServer,
-				mediaCache: config.mediaCache,
-				options: config.options,
-				messageId: messageIdReal,
-				...messageGenOptions
-			})
-			for (const targetDeviceJid of targetDeviceJids) {
-				try {
-					await relayMessage(jid, fullMsgReal.message!, {
-						messageId: messageIdReal,
-						participant: { jid: targetDeviceJid, count: 0 },
-						useCachedGroupMetadata: true,
-						useUserDevicesCache: true,
-						additionalAttributes,
-						additionalNodes
-					})
-				} catch (err) {
-					logger.warn(
-						{ err, targetDeviceJid, messageId: messageIdReal },
-						'sendSecretGroupMessage: relay to target failed'
-					)
-				}
-			}
-			logger.debug(
-				{ msgIdPlaceholder: messageId, msgIdReal: messageIdReal, targetDevices: targetDeviceJids.length },
-				'sendSecretGroupMessage: placeholder to all, real (own id) to target'
-			)
-
-			if (config.emitOwnEvents) {
-				process.nextTick(() => {
-					processingMutex.mutex(() => upsertMessage(fullMsgReal, 'append'))
-				})
-			}
-			return fullMsgReal
 		}
 	}
 }

@@ -193,7 +193,7 @@ export const makeBusinessSocket = (config: SocketConfig) => {
 	}
 
 	const productUpdate = async (productId: string, update: ProductUpdate) => {
-		update = await uploadingNecessaryImagesOfProduct(update, waUploadToServer)
+		update = await uploadingNecessaryImagesOfProduct(update, waUploadToServer, undefined, config.logger)
 		const editNode = toProductNode(productId, update)
 
 		const result = await query({
@@ -233,7 +233,7 @@ export const makeBusinessSocket = (config: SocketConfig) => {
 	const productCreate = async (create: ProductCreate) => {
 		// ensure isHidden is defined
 		create.isHidden = !!create.isHidden
-		create = await uploadingNecessaryImagesOfProduct(create, waUploadToServer)
+		create = await uploadingNecessaryImagesOfProduct(create, waUploadToServer, undefined, config.logger)
 		const createNode = toProductNode(undefined, create)
 
 		const result = await query({

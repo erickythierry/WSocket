@@ -20,8 +20,10 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     rejectCall: (callId: string, callFrom: string) => Promise<void>;
     fetchMessageHistory: (count: number, oldestMsgKey: import("../Types").WAMessageKey, oldestMsgTimestamp: number | Long) => Promise<string>;
     requestPlaceholderResend: (messageKey: import("../Types").WAMessageKey) => Promise<string | undefined>;
-    getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<any>;
+    getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<import("..").BinaryNode>;
     reissueTcTokenAfterIdentityChange: (jid: string) => Promise<void>;
+    scheduleTcTokenPrune: () => void;
+    cancelTcTokenPrune: () => void;
     getLidForPn: import("..").LidResolver;
     cacheLidMapping: (pnJid?: string, lidJid?: string) => void;
     tcTokenStorageJid: (jid: string) => string;
@@ -29,7 +31,7 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     flushTcTokenIndex: () => Promise<void>;
     withFlushedTcTokenIndex: <T>(task: () => Promise<T>) => Promise<T>;
     assertSessions: (jids: string[], force: boolean, lids?: string) => Promise<boolean>;
-    relayMessage: (jid: string, message: import("../Types").WAProto.IMessage, { messageId: msgId, participant, additionalAttributes, additionalNodes, useUserDevicesCache, useCachedGroupMetadata, statusJidList, newsletterMediaId, isretry, excludeJids, includeJids, decryptFailHide }: import("../Types").MessageRelayOptions) => Promise<string>;
+    relayMessage: (jid: string, message: import("../Types").WAProto.IMessage, { messageId: msgId, participant, additionalAttributes, additionalNodes, useUserDevicesCache, useCachedGroupMetadata, statusJidList, newsletterMediaId, isretry, includeJids, decryptFailHide }: import("../Types").MessageRelayOptions) => Promise<string>;
     sendReceipt: (jid: string, participant: string | undefined, messageIds: string[], type: import("../Types").MessageReceiptType) => Promise<void>;
     sendReceipts: (keys: import("../Types").WAMessageKey[], type: import("../Types").MessageReceiptType) => Promise<void>;
     readMessages: (keys: import("../Types").WAMessageKey[]) => Promise<void>;
@@ -42,8 +44,10 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     createParticipantNodes: (jids: string[], message: import("../Types").WAProto.IMessage, extraAttrs?: import("..").BinaryNode["attrs"], lid?: any, meid?: any, melid?: any) => Promise<{
         nodes: import("..").BinaryNode[];
         shouldIncludeDeviceIdentity: boolean;
+        failedJids: string[];
     }>;
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<import("..").JidWithDevice[]>;
+    userDevicesCache: import("../Types").CacheStore;
     getSelectiveRelayContext: (groupJid: string, messageId: string) => {
         groupJid: string;
         allowedUsers: string[];
@@ -52,7 +56,6 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     getSelectiveSentMessage: (groupJid: string, messageId: string) => import("../Types").WAProto.IMessage | undefined;
     updateMediaMessage: (message: import("../Types").WAProto.IWebMessageInfo) => Promise<import("../Types").WAProto.IWebMessageInfo>;
     sendMessage: (jid: string, content: import("../Types").AnyMessageContent, options?: import("../Types").MiscMessageGenerationOptions) => Promise<import("../Types").WAProto.WebMessageInfo | undefined>;
-    sendSecretGroupMessage: (jid: string, messageObject: import("../Types").AnyMessageContent, options?: import("../Types").SecretGroupMessageOptions) => Promise<import("../Types").WAProto.WebMessageInfo>;
     newsletterCreate: (name: string, description?: string) => Promise<import("../Types").NewsletterMetadata>;
     newsletterUpdate: (jid: string, updates: import("../Types").NewsletterUpdate) => Promise<unknown>;
     newsletterSubscribers: (jid: string) => Promise<{
@@ -110,9 +113,19 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
         [_: string]: import("../Types").GroupMetadata;
     }>;
     getBotListV2: () => Promise<import("../Types").BotListInfo[]>;
-    processingMutex: {
+    messageMutex: {
+        mutex<T>(chat: string, author: string, task: () => Promise<T> | T): Promise<T>;
+    };
+    receiptMutex: {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
     };
+    notificationMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    appStatePatchMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    placeholderResendCache: import("../Types").CacheStore;
     upsertMessage: (msg: import("../Types").WAMessage, type: import("../Types").MessageUpsertType) => Promise<void>;
     appPatch: (patchCreate: import("../Types").WAPatchCreate) => Promise<void>;
     sendPresenceUpdate: (type: import("../Types").WAPresence, toJid?: string) => Promise<void>;
@@ -185,6 +198,7 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     logout: (msg?: string) => Promise<void>;
     end: (error: Error | undefined) => void;
     onUnexpectedError: (err: Error | import("@hapi/boom").Boom, msg: string) => void;
+    onSocketEnd: (handler: () => void) => void;
     uploadPreKeys: (count?: number) => Promise<void>;
     uploadPreKeysToServerIfRequired: () => Promise<void>;
     requestPairingCode: (phoneNumber: string, customPairingCode?: string) => Promise<string>;

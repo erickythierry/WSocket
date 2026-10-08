@@ -8,6 +8,7 @@ import {
 	Chat,
 	ChatUpdate,
 	Contact,
+	MessageUpsertType,
 	WAMessage,
 	WAMessageStatus
 } from '../Types'
@@ -69,12 +70,18 @@ type BaileysBufferableEventEmitter = BaileysEventEmitter & {
  * making the data processing more efficient.
  * @param ev the baileys event emitter
  */
-export const makeEventBuffer = (logger: ILogger): BaileysBufferableEventEmitter => {
+/** teto para um buffer aberto; buffer esquecido deixa a sessão conectada e muda */
+const BUFFER_TIMEOUT_MS = 60_000
+const MAX_HISTORY_CACHE = 10_000
+
+export const makeEventBuffer = (logger: ILogger, ignoredEvents?: BaileysEvent[]): BaileysBufferableEventEmitter => {
 	const ev = new EventEmitter()
+	const ignored = new Set(ignoredEvents)
 	const historyCache = new Set<string>()
 
 	let data = makeBufferData()
 	let buffersInProgress = 0
+	let bufferTimer: NodeJS.Timeout | undefined
 
 	// take the generic event and fire it as a baileys event
 	ev.on('event', (map: BaileysEventData) => {
@@ -85,6 +92,16 @@ export const makeEventBuffer = (logger: ILogger): BaileysBufferableEventEmitter 
 
 	function buffer() {
 		buffersInProgress += 1
+		if (buffersInProgress === 1) {
+			clearTimeout(bufferTimer)
+			bufferTimer = setTimeout(() => {
+				if (buffersInProgress) {
+					logger.warn({ buffersInProgress }, `buffer de eventos aberto há ${BUFFER_TIMEOUT_MS}ms, liberando`)
+					flush(true)
+				}
+			}, BUFFER_TIMEOUT_MS)
+			bufferTimer.unref?.()
+		}
 	}
 
 	function flush(force = false) {
@@ -93,7 +110,10 @@ export const makeEventBuffer = (logger: ILogger): BaileysBufferableEventEmitter 
 			return false
 		}
 
-		if (!force) {
+		if (force) {
+			// forçado fecha todos os buffers; sem zerar, o buffer continuava aberto depois do flush
+			buffersInProgress = 0
+		} else {
 			// reduce the number of buffers in progress
 			buffersInProgress -= 1
 			// if there are still some buffers going on
@@ -102,6 +122,9 @@ export const makeEventBuffer = (logger: ILogger): BaileysBufferableEventEmitter 
 				return false
 			}
 		}
+
+		clearTimeout(bufferTimer)
+		bufferTimer = undefined
 
 		const newData = makeBufferData()
 		const chatUpdates = Object.values(data.chatUpdates)
@@ -115,9 +138,13 @@ export const makeEventBuffer = (logger: ILogger): BaileysBufferableEventEmitter 
 			}
 		}
 
-		const consolidatedData = consolidateEvents(data)
+		const { map: consolidatedData, extraUpserts } = consolidateEvents(data)
 		if (Object.keys(consolidatedData).length) {
 			ev.emit('event', consolidatedData)
+		}
+
+		for (const upsert of extraUpserts) {
+			ev.emit('event', { 'messages.upsert': upsert })
 		}
 
 		data = newData
@@ -139,6 +166,10 @@ export const makeEventBuffer = (logger: ILogger): BaileysBufferableEventEmitter 
 			}
 		},
 		emit<T extends BaileysEvent>(event: BaileysEvent, evData: BaileysEventMap[T]) {
+			if (ignored.has(event)) {
+				return false
+			}
+
 			if (buffersInProgress && BUFFERABLE_EVENT_SET.has(event)) {
 				append(data, historyCache, event as BufferableEvent, evData, logger)
 				return true
@@ -201,6 +232,11 @@ function append<E extends BufferableEvent>(
 ) {
 	switch (event) {
 		case 'messaging-history.set':
+			// dedupe de history sync vive o socket inteiro: sem teto, cresce a cada lote
+			if (historyCache.size > MAX_HISTORY_CACHE) {
+				historyCache.clear()
+			}
+
 			for (const chat of eventData.chats as Chat[]) {
 				const existingChat = data.historySets.chats[chat.id]
 				if (existingChat) {
@@ -520,6 +556,7 @@ function append<E extends BufferableEvent>(
 
 function consolidateEvents(data: BufferedEventData) {
 	const map: BaileysEventData = {}
+	const extraUpserts: BaileysEventMap['messages.upsert'][] = []
 
 	if (!data.historySets.empty) {
 		map['messaging-history.set'] = {
@@ -548,12 +585,23 @@ function consolidateEvents(data: BufferedEventData) {
 		map['chats.delete'] = chatDeleteList
 	}
 
-	const messageUpsertList = Object.values(data.messageUpserts)
-	if (messageUpsertList.length) {
-		const type = messageUpsertList[0].type
-		map['messages.upsert'] = {
-			messages: messageUpsertList.map(m => m.message),
-			type
+	// um messages.upsert por tipo: o lote herdava o tipo do primeiro item, e um comando ao vivo (notify)
+	// atrás de backlog (append) saía como append e não rodava
+	const upsertsByType = new Map<MessageUpsertType, WAMessage[]>()
+	for (const { message, type } of Object.values(data.messageUpserts)) {
+		const list = upsertsByType.get(type)
+		if (list) {
+			list.push(message)
+		} else {
+			upsertsByType.set(type, [message])
+		}
+	}
+
+	for (const [type, messages] of upsertsByType) {
+		if (map['messages.upsert']) {
+			extraUpserts.push({ messages, type })
+		} else {
+			map['messages.upsert'] = { messages, type }
 		}
 	}
 
@@ -596,7 +644,7 @@ function consolidateEvents(data: BufferedEventData) {
 		map['groups.update'] = groupUpdateList
 	}
 
-	return map
+	return { map, extraUpserts }
 }
 
 function concatChats<C extends Partial<Chat>>(a: C, b: Partial<Chat>) {

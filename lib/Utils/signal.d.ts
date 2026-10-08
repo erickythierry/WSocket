@@ -34,7 +34,9 @@ export declare const extractE2ESessionFromRetryReceipt: (receipt: BinaryNode) =>
         publicKey: Uint8Array;
     } | undefined;
 } | null;
-export declare const parseAndInjectE2ESessions: (node: BinaryNode, repository: SignalRepository, lid?: string | null | undefined, meid?: string, melid?: string) => Promise<void>;
+export declare const parseAndInjectE2ESessions: (node: BinaryNode, repository: SignalRepository, lid?: string | null | undefined, meid?: string, melid?: string) => Promise<{
+    failed: string[];
+}>;
 export declare const extractDeviceJids: (result: USyncQueryResultList[], myJid: string, excludeZeroDevices: boolean, mylid?: string) => JidWithDevice[];
 /**
  * get the next N keys for upload or processing

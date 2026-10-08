@@ -1,7 +1,7 @@
 import NodeCache from '@cacheable/node-cache'
 import { Boom } from '@hapi/boom'
 import { randomBytes } from 'crypto'
-import Long = require('long')
+import type Long from 'long'
 import { proto } from '../../WAProto'
 import { DEFAULT_CACHE_TTLS, KEY_BUNDLE_TYPE, MIN_PREKEY_COUNT, SERVER_ERROR_CODES } from '../Defaults'
 import {
@@ -46,14 +46,7 @@ import {
 	xmppSignedPreKey
 } from '../Utils'
 import { makeMutex } from '../Utils/make-mutex'
-import {
-	buildTcTokenIndexEntry,
-	isTcTokenExpired,
-	readLastTcTokenPruneTs,
-	readTcTokenIndex,
-	storeTcTokensFromIqResult,
-	TC_TOKEN_INDEX_KEY
-} from '../Utils/tc-token-utils'
+import { storeTcTokensFromIqResult } from '../Utils/tc-token-utils'
 import {
 	areJidsSameUser,
 	BinaryNode,
@@ -72,17 +65,30 @@ import {
 	S_WHATSAPP_NET
 } from '../WABinary'
 import { extractGroupMetadata } from './groups'
+import { BoundedTtlMap } from '../Utils/bounded-ttl-map'
+import caches from '../Utils/cache-utils'
 import { makeMessagesSocket } from './messages-send'
 
 
 export const makeMessagesRecvSocket = (config: SocketConfig) => {
-	const { logger, retryRequestDelayMs, maxMsgRetryCount, getMessage, shouldIgnoreJid } = config
+	const {
+		logger,
+		retryRequestDelayMs,
+		maxMsgRetryCount,
+		getMessage,
+		shouldIgnoreJid,
+		skipReceiptEvents
+	} = config
+	const pocRelayTrace = process.env.WA_POC_RELAY_TRACE === '1'
 	const sock = makeMessagesSocket(config)
 	const {
 		ev,
 		authState,
 		ws,
-		processingMutex,
+		messageMutex,
+		receiptMutex,
+		notificationMutex,
+		appStatePatchMutex,
 		signalRepository,
 		query,
 		upsertMessage,
@@ -102,12 +108,52 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		tcTokenStorageJid,
 		trackTcTokenJid,
 		flushTcTokenIndex,
-		withFlushedTcTokenIndex,
-		reissueTcTokenAfterIdentityChange
+		reissueTcTokenAfterIdentityChange,
+		scheduleTcTokenPrune,
+		cancelTcTokenPrune,
+		userDevicesCache
 	} = sock
+
+	/** lista de devices mudou: invalida o cache do dono e apaga a sessão dos devices removidos */
+	const handleDevicesNotification = async (node: BinaryNode, child: BinaryNode, devices: BinaryNode[]) => {
+		const owners = new Set<string>()
+		const ids = [node.attrs.from, node.attrs.lid, child.attrs.jid, child.attrs.lid]
+		for (const d of devices) {
+			ids.push(d.attrs.jid, d.attrs.lid)
+		}
+
+		for (const jid of ids) {
+			if (jid) {
+				const owner = jidNormalizedUser(jid)
+				owners.add(owner)
+				const lid = caches.lidCache.get(owner)
+				if (lid) {
+					owners.add(jidNormalizedUser(lid))
+				}
+			}
+		}
+
+		for (const owner of owners) {
+			userDevicesCache.del(owner)
+		}
+
+		if (child.tag === 'remove') {
+			const removed = devices.map(d => d.attrs.jid).filter(Boolean)
+			if (removed.length) {
+				await authState.keys.set({
+					session: Object.fromEntries(removed.map(jid => [signalRepository.jidToSignalProtocolAddress(jid), null]))
+				})
+				logger.debug({ removed }, 'sessões de devices removidos apagadas')
+			}
+		}
+	}
 
 	/** this mutex ensures that each retryRequest will wait for the previous one to finish */
 	const retryMutex = makeMutex()
+	/** reenvio por retry receipt: 2 IQs e um relay; fora do mutex de recibo para não travar os outros */
+	const resendMutex = makeMutex()
+	/** bundle de retry por autor numa janela curta: 50 mensagens sem SKDM viravam 50 IQs e 50 prekeys */
+	const recentForcedSessions = new BoundedTtlMap<string, true>(5_000, 10_000)
 
 	const RETRY_PER_PARTICIPANT_MAX = 3
 	const RETRY_PER_PARTICIPANT_WINDOW_MS = 10 * 60 * 1000
@@ -134,103 +180,20 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		return { skip, warn }
 	}
 
-	const TC_TOKEN_PRUNE_BATCH = 20
-	const TC_TOKEN_PRUNE_INTERVAL = 24 * 60 * 60
-	const TC_TOKEN_PRUNE_MAX_JITTER_MS = 15 * 60 * 1000
-	let tcTokenPruneInFlight = false
-	let tcTokenPruneTimer: ReturnType<typeof setTimeout> | undefined
-
-	function scheduleTcTokenPrune() {
-		if (tcTokenPruneTimer || tcTokenPruneInFlight) return
-		tcTokenPruneTimer = setTimeout(() => {
-			tcTokenPruneTimer = undefined
-			void maybePruneExpiredTcTokens()
-		}, Math.floor(Math.random() * TC_TOKEN_PRUNE_MAX_JITTER_MS))
-	}
-
-	async function maybePruneExpiredTcTokens() {
-		if (tcTokenPruneInFlight) return
-		tcTokenPruneInFlight = true
-		try {
-			const lastPrune = await readLastTcTokenPruneTs(authState.keys)
-			if (unixTimestampSeconds() - lastPrune >= TC_TOKEN_PRUNE_INTERVAL) {
-				await withFlushedTcTokenIndex(runPruneExpiredTcTokens)
-			}
-		} catch (err) {
-			logger.warn({ err: (err as Error)?.message }, 'falha ao executar prune de tctokens')
-		} finally {
-			tcTokenPruneInFlight = false
-		}
-	}
-
-	async function runPruneExpiredTcTokens() {
-		const persisted = await readTcTokenIndex(authState.keys)
-		if (!persisted.length) {
-			await authState.keys.set({
-				tctoken: { [TC_TOKEN_INDEX_KEY]: buildTcTokenIndexEntry([], unixTimestampSeconds()) }
-			})
-			return
+	/** cache criado aqui é fechado no fim do socket; o injetado pelo chamador é dele */
+	const ownCache = (provided: CacheStore | undefined, stdTTL: number): CacheStore => {
+		if (provided) {
+			return provided
 		}
 
-		type TcTokenWrite = null | { token: Buffer; timestamp?: string; senderTimestamp?: number }
-		const survivors = new Set<string>()
-		let mutated = 0
-		for (let offset = 0; offset < persisted.length; offset += TC_TOKEN_PRUNE_BATCH) {
-			const batch = persisted.slice(offset, offset + TC_TOKEN_PRUNE_BATCH)
-			const tokens = await authState.keys.get('tctoken', batch)
-			const writes: Record<string, TcTokenWrite> = {}
-
-			for (const jid of batch) {
-				const entry = tokens[jid]
-				if (!entry) {
-					mutated += 1
-					continue
-				}
-
-				const keepPeerToken = !!entry.token?.length && !isTcTokenExpired(entry.timestamp)
-				const keepSenderTs = entry.senderTimestamp !== undefined && !isTcTokenExpired(entry.senderTimestamp)
-				if (!keepPeerToken && !keepSenderTs) {
-					writes[jid] = null
-					mutated += 1
-				} else if (!keepPeerToken && keepSenderTs && entry.token?.length) {
-					writes[jid] = { token: Buffer.alloc(0), senderTimestamp: entry.senderTimestamp }
-					survivors.add(jid)
-					mutated += 1
-				} else {
-					survivors.add(jid)
-				}
-			}
-
-			if (Object.keys(writes).length) await authState.keys.set({ tctoken: writes })
-		}
-
-		await authState.keys.set({
-			tctoken: {
-				[TC_TOKEN_INDEX_KEY]: buildTcTokenIndexEntry(survivors, unixTimestampSeconds())
-			}
-		})
-		logger.debug({ mutated, remaining: survivors.size }, 'tctokens expirados removidos')
+		const cache = new NodeCache<any>({ stdTTL, useClones: false })
+		sock.onSocketEnd(() => cache.close())
+		return cache
 	}
 
-	const msgRetryCache: CacheStore =
-		config.msgRetryCounterCache ||
-		new NodeCache<any>({
-			stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
-			useClones: false
-		})
-	const callOfferCache: CacheStore =
-		config.callOfferCache ||
-		new NodeCache<any>({
-			stdTTL: DEFAULT_CACHE_TTLS.CALL_OFFER, // 5 mins
-			useClones: false
-		})
-
-	const placeholderResendCache: CacheStore =
-		config.placeholderResendCache ||
-		new NodeCache<any>({
-			stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
-			useClones: false
-		})
+	const msgRetryCache = ownCache(config.msgRetryCounterCache, DEFAULT_CACHE_TTLS.MSG_RETRY)
+	const callOfferCache = ownCache(config.callOfferCache, DEFAULT_CACHE_TTLS.CALL_OFFER)
+	const placeholderResendCache = config.placeholderResendCache || sock.placeholderResendCache
 
 	let sendActiveReceipts = false
 
@@ -330,8 +293,15 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				receipt.attrs.participant = node.attrs.participant
 			}
 
-			if (retryCount <=2 && forceIncludeKeys) {
-				await assertSessions([jidNormalizedUser(author)], true);
+			const authorJid = jidNormalizedUser(author)
+			// janela por device: cada device tem a própria sessão e precisa do próprio bundle
+			// um bundle por autor na janela: o primeiro recibo leva <keys> e o remetente refaz a sessão; os
+			// seguintes reenviam já com ela. Antes eram uma prekey nova, um creds.update e um IQ por mensagem.
+			// A mesma one-time prekey em vários recibos não serve: a segunda sessão montada com ela falharia.
+			if (retryCount <= 2 && forceIncludeKeys && !recentForcedSessions.has(author)) {
+				recentForcedSessions.set(author, true)
+				await assertSessions([authorJid], true)
+
 				const { update, preKeys } = await getNextPreKeys(authState, 1)
 
 				const [keyId] = Object.keys(preKeys)
@@ -549,6 +519,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 					logger.info({ deviceJids }, 'got my own devices')
 				}
 
+				await handleDevicesNotification(node, child, devices)
 				break
 		case 'server_sync':
 			const updates = getBinaryNodeChildren(node, 'collection')
@@ -570,7 +541,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				}
 
 				try {
-					await resyncAppState(collectionNames, false)
+					await appStatePatchMutex.mutex(() => resyncAppState(collectionNames, false))
 				} catch (error: any) {
 					logger.info(
 						{ error: error?.message, collections: collectionNames },
@@ -787,7 +758,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		const bundle = extractE2ESessionFromRetryReceipt(receiptNode)
 		if (bundle) {
 			try {
-				await signalRepository.injectE2ESession({ jid: participant, session: bundle as any })
+				await signalRepository.injectE2ESession({ jid: participant, session: bundle })
 				injectedFromBundle = true
 				logger.debug({ participant }, 'injected session from retry receipt key bundle')
 			} catch (error) {
@@ -861,7 +832,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 	const handleReceipt = async (node: BinaryNode) => {
 		const { attrs, content } = node
-		if (process.env.WA_POC_RELAY_TRACE === '1') {
+		if (pocRelayTrace) {
 			logger.info(
 				{
 					id: attrs.id,
@@ -880,7 +851,13 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			return
 		}
 
-		const isLid = attrs.from.includes('lid')
+		// ninguém consome message-receipt.update/messages.update: recibo comum só precisa do ack
+		if (skipReceiptEvents && attrs.type !== 'retry') {
+			await sendMessageAck(node)
+			return
+		}
+
+		const isLid = isLidUser(attrs.from)
 		const isNodeFromMe = areJidsSameUser(
 			attrs.participant || attrs.from,
 			isLid ? authState.creds.me?.lid : authState.creds.me?.id
@@ -908,65 +885,65 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 
 		try {
-			await Promise.all([
-				processingMutex.mutex(async () => {
-					const status = getStatusFromReceiptType(attrs.type)
-					if (
-						typeof status !== 'undefined' &&
-						// basically, we only want to know when a message from us has been delivered to/read by the other person
-						// or another device of ours has read some messages
-						(status >= proto.WebMessageInfo.Status.SERVER_ACK || !isNodeFromMe)
-					) {
-						if (isJidGroup(remoteJid) || isJidStatusBroadcast(remoteJid)) {
-							if (attrs.participant) {
-								const updateKey: keyof MessageUserReceipt =
-									status === proto.WebMessageInfo.Status.DELIVERY_ACK ? 'receiptTimestamp' : 'readTimestamp'
-								const receiptTs = attrs.t ? +attrs.t : unixTimestampSeconds()
-								ev.emit(
-									'message-receipt.update',
-									ids.map(id => ({
-										key: { ...key, id },
-										receipt: {
-											userJid: jidNormalizedUser(attrs.participant),
-											[updateKey]: receiptTs
-										}
-									}))
-								)
-							}
-						} else {
+			await receiptMutex.mutex(async () => {
+				const status = getStatusFromReceiptType(attrs.type)
+				if (
+					typeof status !== 'undefined' &&
+					// basically, we only want to know when a message from us has been delivered to/read by the other person
+					// or another device of ours has read some messages
+					(status >= proto.WebMessageInfo.Status.SERVER_ACK || !isNodeFromMe)
+				) {
+					if (isJidGroup(remoteJid) || isJidStatusBroadcast(remoteJid)) {
+						if (attrs.participant) {
+							const updateKey: keyof MessageUserReceipt =
+								status === proto.WebMessageInfo.Status.DELIVERY_ACK ? 'receiptTimestamp' : 'readTimestamp'
+							const receiptTs = attrs.t ? +attrs.t : unixTimestampSeconds()
 							ev.emit(
-								'messages.update',
+								'message-receipt.update',
 								ids.map(id => ({
 									key: { ...key, id },
-									update: { status }
+									receipt: {
+										userJid: jidNormalizedUser(attrs.participant),
+										[updateKey]: receiptTs
+									}
 								}))
 							)
 						}
+					} else {
+						ev.emit(
+							'messages.update',
+							ids.map(id => ({
+								key: { ...key, id },
+								update: { status }
+							}))
+						)
 					}
+				}
+			})
 
-					if (attrs.type === 'retry') {
-						// correctly set who is asking for the retry
-						key.participant = key.participant || attrs.from
-						const retryNode = getBinaryNodeChild(node, 'retry')
-						if (!retryNode) {
-							logger.warn({ attrs, key }, 'retry receipt without <retry> child, skipping resend')
-						} else if (willSendMessageAgain(ids[0], key.participant)) {
-							if (key.fromMe) {
-								try {
-									logger.debug({ attrs, key }, 'recv retry request')
-									await sendMessagesAgain(key, ids, retryNode, node)
-								} catch (error) {
-									logger.error({ key, ids, trace: error.stack }, 'error in sending message again')
-								}
-							} else {
-								logger.info({ attrs, key }, 'recv retry for not fromMe message')
+			if (attrs.type === 'retry') {
+				// correctly set who is asking for the retry
+				key.participant = key.participant || attrs.from
+				const retryNode = getBinaryNodeChild(node, 'retry')
+				if (!retryNode) {
+					logger.warn({ attrs, key }, 'retry receipt without <retry> child, skipping resend')
+				} else if (willSendMessageAgain(ids[0], key.participant)) {
+					if (key.fromMe) {
+						await resendMutex.mutex(async () => {
+							try {
+								logger.debug({ attrs, key }, 'recv retry request')
+								await sendMessagesAgain(key, ids, retryNode, node)
+							} catch (error) {
+								logger.error({ key, ids, trace: error.stack }, 'error in sending message again')
 							}
-						} else {
-							logger.info({ attrs, key }, 'will not send message again, as sent too many times')
-						}
+						})
+					} else {
+						logger.info({ attrs, key }, 'recv retry for not fromMe message')
 					}
-				})
-			])
+				} else {
+					logger.info({ attrs, key }, 'will not send message again, as sent too many times')
+				}
+			}
 		} finally {
 			await sendMessageAck(node)
 		}
@@ -981,106 +958,89 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 
 		try {
-			await Promise.all([
-				processingMutex.mutex(async () => {
-					const msg = await processNotification(node)
-					if (msg) {
-						const fromMe = areJidsSameUser(node.attrs.participant || remoteJid, authState.creds.me!.id)
-						msg.key = {
-							remoteJid,
-							fromMe,
-							participant: node.attrs.participant,
-							id: node.attrs.id,
-							...(msg.key || {})
-						}
-						msg.participant ??= node.attrs.participant
-						msg.messageTimestamp = +node.attrs.t
-
-						const fullMsg = proto.WebMessageInfo.fromObject(msg)
-						await upsertMessage(fullMsg, 'append')
+			await notificationMutex.mutex(async () => {
+				const msg = await processNotification(node)
+				if (msg) {
+					const fromMe = areJidsSameUser(node.attrs.participant || remoteJid, authState.creds.me!.id)
+					msg.key = {
+						remoteJid,
+						fromMe,
+						participant: node.attrs.participant,
+						id: node.attrs.id,
+						...(msg.key || {})
 					}
-				})
-			])
+					msg.participant ??= node.attrs.participant
+					msg.messageTimestamp = +node.attrs.t
+
+					const fullMsg = proto.WebMessageInfo.fromObject(msg)
+					await upsertMessage(fullMsg, 'append')
+				}
+			})
 		} finally {
 			await sendMessageAck(node)
 		}
 	}
 
 	const handleMessage = async (node: BinaryNode) => {
-		if (shouldIgnoreJid(node.attrs.from) && node.attrs.from !== '@s.whatsapp.net') {
-			logger.debug({ key: node.attrs.key }, 'ignored message')
-			await sendMessageAck(node)
-			return
-		}
-
-		const encNode = getBinaryNodeChild(node, 'enc')
-
-		// TODO: temporary fix for crashes and issues resulting of failed msmsg decryption
-		if (encNode && encNode.attrs.type === 'msmsg') {
-			logger.debug({ key: node.attrs.key }, 'ignored msmsg')
-			await sendMessageAck(node)
-			return
-		}
-
-		let response: string | undefined
-		/*
-
-		if (getBinaryNodeChild(node, 'unavailable') && !encNode) {
-			await sendMessageAck(node)
-			const { key } = decodeMessageNode(node, authState.creds.me!.id, authState.creds.me!.lid || '').fullMessage
-			response = await requestPlaceholderResend(key)
-			if (response === 'RESOLVED') {
+		let acked = false
+		const ack = async (errorCode?: number) => {
+			if (acked) {
 				return
 			}
 
-			logger.debug('received unavailable message, acked and requested resend from phone')
-		} else {
-			if (placeholderResendCache.get(node.attrs.id)) {
-				placeholderResendCache.del(node.attrs.id)
-			}
-		}
-
-		//desabilitado por mau funcionamento.
-			*/
-
-		const {
-			fullMessage: msg,
-			category,
-			author,
-			decrypt
-		} = decryptMessageNode(node, authState.creds.me!.id, authState.creds.me!.lid || '', signalRepository, logger)
-
-		if (response && msg?.messageStubParameters?.[0] === NO_MESSAGE_FOUND_ERROR_TEXT) {
-			msg.messageStubParameters = [NO_MESSAGE_FOUND_ERROR_TEXT, response]
-		}
-
-		if (
-			msg.message?.protocolMessage?.type === proto.Message.ProtocolMessage.Type.SHARE_PHONE_NUMBER &&
-			node.attrs.sender_pn
-		) {
-			ev.emit('chats.phoneNumberShare', { lid: node.attrs.from, jid: node.attrs.sender_pn })
-		}
-
-		if (msg.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
-			if (
-				msg?.messageStubParameters?.[0] === MISSING_KEYS_ERROR_TEXT ||
-				msg.messageStubParameters?.[0] === NO_MESSAGE_FOUND_ERROR_TEXT
-			) {
-				return sendMessageAck(node)
-			}
+			acked = true
+			await sendMessageAck(node, errorCode)
 		}
 
 		try {
-			await Promise.all([
-				processingMutex.mutex(async () => {
-					await decrypt()
-					// message failed to decrypt
-					if (msg.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
-						if (msg?.messageStubParameters?.[0] === MISSING_KEYS_ERROR_TEXT) {
-							return sendMessageAck(node, NACK_REASONS.ParsingError)
-						}
+			if (shouldIgnoreJid(node.attrs.from) && node.attrs.from !== '@s.whatsapp.net') {
+				logger.debug({ key: node.attrs.key }, 'ignored message')
+				return
+			}
 
-						retryMutex.mutex(async () => {
+			const encNode = getBinaryNodeChild(node, 'enc')
+
+			// TODO: temporary fix for crashes and issues resulting of failed msmsg decryption
+			if (encNode?.attrs.type === 'msmsg') {
+				logger.debug({ key: node.attrs.key }, 'ignored msmsg')
+				return
+			}
+
+			// dentro do try: stanza inesperada lança aqui e, sem ack, o servidor reentregava a cada reconexão
+			const {
+				fullMessage: msg,
+				category,
+				author,
+				decrypt
+			} = decryptMessageNode(node, authState.creds.me!.id, authState.creds.me!.lid || '', signalRepository, logger)
+
+			if (
+				msg.message?.protocolMessage?.type === proto.Message.ProtocolMessage.Type.SHARE_PHONE_NUMBER &&
+				node.attrs.sender_pn
+			) {
+				ev.emit('chats.phoneNumberShare', { lid: node.attrs.from, jid: node.attrs.sender_pn })
+			}
+
+			if (msg.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
+				if (
+					msg?.messageStubParameters?.[0] === MISSING_KEYS_ERROR_TEXT ||
+					msg.messageStubParameters?.[0] === NO_MESSAGE_FOUND_ERROR_TEXT
+				) {
+					return
+				}
+			}
+
+			let sendDeliveryReceipt: (() => Promise<void>) | undefined
+			await messageMutex.mutex(jidNormalizedUser(msg.key.remoteJid!), jidNormalizedUser(author), async () => {
+				await decrypt()
+				// message failed to decrypt
+				if (msg.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
+					if (msg?.messageStubParameters?.[0] === MISSING_KEYS_ERROR_TEXT) {
+						return ack(NACK_REASONS.ParsingError)
+					}
+
+					retryMutex
+						.mutex(async () => {
 							if (ws.isOpen) {
 								if (getBinaryNodeChild(node, 'unavailable')) {
 									return
@@ -1094,44 +1054,51 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 								logger.debug({ node }, 'connection closed, ignoring retry req')
 							}
 						})
-					} else {
-						// no type in the receipt => message delivered
-						let type: MessageReceiptType = undefined
-						let participant = msg.key.participant
-						if (category === 'peer') {
-							// special peer message
-							type = 'peer_msg'
-						} else if (msg.key.fromMe) {
-							// message was sent by us from a different device
-							type = 'sender'
-							// need to specially handle this case
-							if (isJidUser(msg.key.remoteJid!)) {
-								participant = author
-							}
-						} else if (!sendActiveReceipts) {
-							type = 'inactive'
-						}
+						.catch(err => logger.warn({ err, id: node.attrs.id }, 'falha ao pedir retry'))
 
-						await sendReceipt(msg.key.remoteJid!, participant!, [msg.key.id!], type)
+					// o stub de falha não vai ao consumidor: a mensagem de verdade chega depois do retry
+					return
+				}
 
-						// send ack for history message
-						const isAnyHistoryMsg = getHistoryMsg(msg.message!)
-						if (isAnyHistoryMsg) {
-							const jid = jidNormalizedUser(msg.key.remoteJid!)
-							await sendReceipt(jid, undefined, [msg.key.id!], 'hist_sync')
-						}
+				// no type in the receipt => message delivered
+				let type: MessageReceiptType = undefined
+				let participant = msg.key.participant
+				if (category === 'peer') {
+					// special peer message
+					type = 'peer_msg'
+				} else if (msg.key.fromMe) {
+					// message was sent by us from a different device
+					type = 'sender'
+					// need to specially handle this case
+					if (isJidUser(msg.key.remoteJid!)) {
+						participant = author
 					}
+				} else if (!sendActiveReceipts) {
+					type = 'inactive'
+				}
 
-					cleanMessage(msg, authState.creds.me!.id)
+				const isAnyHistoryMsg = getHistoryMsg(msg.message!)
+				sendDeliveryReceipt = async () => {
+					await sendReceipt(msg.key.remoteJid!, participant!, [msg.key.id!], type)
+					// send ack for history message
+					if (isAnyHistoryMsg) {
+						await sendReceipt(jidNormalizedUser(msg.key.remoteJid!), undefined, [msg.key.id!], 'hist_sync')
+					}
+				}
 
-					await sendMessageAck(node)
+				cleanMessage(msg, authState.creds.me!.id)
 
-					await upsertMessage(msg, node.attrs.offline ? 'append' : 'notify')
-				})
-			])
+				await upsertMessage(msg, node.attrs.offline ? 'append' : 'notify')
+			})
+
+			// recibo e ack depois do upsert e fora do mutex: rede não segura a decifração das próximas
+			if (sendDeliveryReceipt) {
+				await sendDeliveryReceipt().catch(err => logger.warn({ err, id: node.attrs.id }, 'falha ao enviar recibo'))
+			}
 		} catch (error) {
-			sendMessageAck(node)
-		logger.error({ err: error, node }, 'error in handling message')
+			logger.error({ err: error, node }, 'error in handling message')
+		} finally {
+			await ack()
 		}
 	}
 
@@ -1252,7 +1219,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	}
 
 	const handleBadAck = async ({ attrs }: BinaryNode) => {
-		if (process.env.WA_POC_RELAY_TRACE === '1') {
+		if (pocRelayTrace) {
 			logger.info(
 				{
 					id: attrs.id,
@@ -1347,6 +1314,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			['notification', handleNotification]
 		])
 		const nodes: OfflineNode[] = []
+		// índice de cabeça: shift() é O(n) e backlog de dezenas de milhares de nós virava CPU quadrática
+		let head = 0
 		let isProcessing = false
 		const BATCH_SIZE = 10
 
@@ -1361,10 +1330,14 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 			isProcessing = true
 
+			let current: BinaryNode | undefined
 			const promise = async () => {
 				let processedInBatch = 0
-				while (nodes.length && ws.isOpen) {
-					const { type, node } = nodes.shift()!
+				while (head < nodes.length && ws.isOpen) {
+					const { type, node } = nodes[head]
+					nodes[head] = undefined as unknown as OfflineNode
+					head += 1
+					current = node
 
 					const nodeProcessor = nodeProcessorMap.get(type)
 
@@ -1382,18 +1355,31 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 						// yield so pings/timers/other I/O can run between batches
 						await yieldToEventLoop()
 					}
+
+					if (head > 1000 && head * 2 > nodes.length) {
+						nodes.splice(0, head)
+						head = 0
+					}
 				}
 
+				nodes.length = 0
+				head = 0
 				isProcessing = false
 			}
 
 			promise().catch(error => {
 				onUnexpectedError(error, 'processing offline nodes')
-				sendMessageAck(node)
+				nodes.length = 0
+				head = 0
+				isProcessing = false
+				if (current) {
+					sendMessageAck(current).catch(err => logger.warn({ err }, 'falha ao ackar nó offline'))
+				}
 			})
 		}
 
-		return { enqueue }
+		const isBusy = () => isProcessing
+		return { enqueue, isBusy }
 	}
 
 	const offlineNodeProcessor = makeOfflineNodeProcessor()
@@ -1406,7 +1392,9 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 	) => {
 		const isOffline = !!node.attrs.offline
 
-		if (isOffline) {
+		// com backlog na fila, o nó ao vivo entra atrás dele: um skmsg ao vivo decifrado antes do SKDM
+		// que ainda está no backlog falhava e virava retry
+		if (isOffline || offlineNodeProcessor.isBusy()) {
 			offlineNodeProcessor.enqueue(type, node)
 		} else {
 			processNodeWithBuffer(node, identifier, exec)
@@ -1656,11 +1644,10 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 
 		if (connection === 'close') {
-			if (tcTokenPruneTimer) {
-				clearTimeout(tcTokenPruneTimer)
-				tcTokenPruneTimer = undefined
-			}
-			void flushTcTokenIndex().catch(() => {})
+			cancelTcTokenPrune()
+			void flushTcTokenIndex().catch(err =>
+				logger.warn({ err: (err as Error)?.message }, 'falha ao salvar índice de tctokens no close')
+			)
 		}
 
 		if (isOnline) scheduleTcTokenPrune()

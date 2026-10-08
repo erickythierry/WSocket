@@ -35,8 +35,11 @@ export class GroupCipher {
 				throw new Error('No session to encrypt message')
 			}
 
-			const iteration = senderKeyState.getSenderChainKey().getIteration()
-			const senderKey = this.getSenderKey(senderKeyState, iteration === 0 ? 0 : iteration + 1)
+			// usa a chain atual e avança, sem pular iteração: pular deixava uma chave guardada por envio (até 2000)
+			const senderChainKey = senderKeyState.getSenderChainKey()
+			const senderKey = senderChainKey.getSenderMessageKey()
+			senderKeyState.setSenderChainKey(senderChainKey.getNext())
+			senderKeyState.clearSenderMessageKeys()
 
 			const ciphertext = await this.getCipherText(senderKey.getIv(), senderKey.getCipherKey(), paddedPlaintext)
 

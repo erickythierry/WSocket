@@ -1,3 +1,4 @@
+import { Boom } from '@hapi/boom'
 import { proto } from '../../WAProto'
 import {
 	GroupMetadata,
@@ -84,8 +85,16 @@ export const makeGroupsSocket = (config: SocketConfig) => {
 			return
 		}
 
-		await groupFetchAllParticipating()
-		await sock.cleanDirtyBits('groups')
+		try {
+			// baixar a metadata de todos os grupos custa um frame de MBs decodificado no loop compartilhado
+			if (!config.skipGroupsDirtyFetch) {
+				await groupFetchAllParticipating()
+			}
+
+			await sock.cleanDirtyBits('groups')
+		} catch (err) {
+			config.logger.warn({ err }, 'falha ao tratar dirty groups')
+		}
 	})
 
 	return {
@@ -306,7 +315,15 @@ export const makeGroupsSocket = (config: SocketConfig) => {
 }
 
 export const extractGroupMetadata = (result: BinaryNode) => {
-	const group = getBinaryNodeChild(result, 'group')!
+	const group = getBinaryNodeChild(result, 'group')
+	if (!group) {
+		// sem isso o erro do servidor (403, 404...) virava TypeError adiante
+		const error = getBinaryNodeChild(result, 'error')
+		throw new Boom(error?.attrs.text || 'group metadata not found', {
+			statusCode: error?.attrs.code ? +error.attrs.code : 404,
+			data: result.attrs
+		})
+	}
 	const descChild = getBinaryNodeChild(group, 'description')
 	let desc: string | undefined
 	let descId: string | undefined

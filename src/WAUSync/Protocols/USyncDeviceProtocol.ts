@@ -1,5 +1,5 @@
 import { USyncQueryProtocol } from '../../Types/USync'
-import { assertNodeErrorFree, BinaryNode, getBinaryNodeChild } from '../../WABinary'
+import { BinaryNode, getBinaryNodeChild } from '../../WABinary'
 //import { USyncUser } from '../USyncUser'
 
 export type KeyIndexData = {
@@ -17,6 +17,8 @@ export type DeviceListData = {
 export type ParsedDeviceInfo = {
 	deviceList?: DeviceListData[]
 	keyIndex?: KeyIndexData
+	/** o servidor respondeu <error> para este usuário: lista vazia não quer dizer "sem device" */
+	error?: boolean
 }
 
 export class USyncDeviceProtocol implements USyncQueryProtocol {
@@ -42,8 +44,12 @@ export class USyncDeviceProtocol implements USyncQueryProtocol {
 		const deviceList: DeviceListData[] = []
 		let keyIndex: KeyIndexData | undefined = undefined
 
+		// usuário com <error> volta sem devices: fica fora do envio em vez de abortar o grupo inteiro
+		if (node.tag === 'devices' && getBinaryNodeChild(node, 'error')) {
+			return { deviceList, error: true }
+		}
+
 		if (node.tag === 'devices') {
-			assertNodeErrorFree(node)
 			const deviceListNode = getBinaryNodeChild(node, 'device-list')
 			const keyIndexNode = getBinaryNodeChild(node, 'key-index-list')
 

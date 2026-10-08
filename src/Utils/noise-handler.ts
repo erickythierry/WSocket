@@ -92,6 +92,7 @@ export const makeNoiseHandler = ({
 	let sentIntro = false
 
 	let inBytes = Buffer.alloc(0)
+	let decodeChain: Promise<unknown> = Promise.resolve()
 
 	authenticate(NOISE_HEADER)
 	authenticate(publicKey)
@@ -157,35 +158,43 @@ export const makeNoiseHandler = ({
 
 			return frame
 		},
-		decodeFrame: async (newData: Buffer | Uint8Array, onFrame: (buff: Uint8Array | BinaryNode) => void) => {
-			// the binary protocol uses its own framing mechanism
-			// on top of the WS frames
-			// so we get this data and separate out the frames
-			const getBytesSize = () => {
-				if (inBytes.length >= 3) {
-					return (inBytes.readUInt8() << 16) | inBytes.readUInt16BE(1)
-				}
+		/** serializado: o inflate assíncrono deixava um frame comprimido terminar depois do seguinte */
+		decodeFrame: (newData: Buffer | Uint8Array, onFrame: (buff: Uint8Array | BinaryNode) => void) => {
+			decodeChain = decodeChain
+				.then(() => decodeFrameNow(newData, onFrame))
+				.catch(err => logger.error({ err }, 'erro ao decodificar frame'))
+			return decodeChain
+		}
+	}
+
+	async function decodeFrameNow(newData: Buffer | Uint8Array, onFrame: (buff: Uint8Array | BinaryNode) => void) {
+		// the binary protocol uses its own framing mechanism
+		// on top of the WS frames
+		// so we get this data and separate out the frames
+		const getBytesSize = () => {
+			if (inBytes.length >= 3) {
+				return (inBytes.readUInt8() << 16) | inBytes.readUInt16BE(1)
+			}
+		}
+
+		inBytes = Buffer.concat([inBytes, newData])
+
+		logger.trace(`recv ${newData.length} bytes, total recv ${inBytes.length} bytes`)
+
+		let size = getBytesSize()
+		while (size && inBytes.length >= size + 3) {
+			let frame: Uint8Array | BinaryNode = inBytes.slice(3, size + 3)
+			inBytes = inBytes.slice(size + 3)
+
+			if (isFinished) {
+				const result = decrypt(frame)
+				frame = await decodeBinaryNode(result)
 			}
 
-			inBytes = Buffer.concat([inBytes, newData])
+			logger.trace({ msg: (frame as BinaryNode)?.attrs?.id }, 'recv frame')
 
-			logger.trace(`recv ${newData.length} bytes, total recv ${inBytes.length} bytes`)
-
-			let size = getBytesSize()
-			while (size && inBytes.length >= size + 3) {
-				let frame: Uint8Array | BinaryNode = inBytes.slice(3, size + 3)
-				inBytes = inBytes.slice(size + 3)
-
-				if (isFinished) {
-					const result = decrypt(frame)
-					frame = await decodeBinaryNode(result)
-				}
-
-				logger.trace({ msg: (frame as BinaryNode)?.attrs?.id }, 'recv frame')
-
-				onFrame(frame)
-				size = getBytesSize()
-			}
+			onFrame(frame)
+			size = getBytesSize()
 		}
 	}
 }

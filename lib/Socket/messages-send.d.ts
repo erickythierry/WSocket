@@ -1,20 +1,21 @@
 import { Boom } from '@hapi/boom';
 import { proto } from '../../WAProto';
-import { AnyMessageContent, MediaConnInfo, MessageReceiptType, MessageRelayOptions, MiscMessageGenerationOptions, SecretGroupMessageOptions, SocketConfig, WAMessageKey } from '../Types';
-import { type LidResolver } from '../Utils/tc-token-utils';
+import { AnyMessageContent, CacheStore, GroupMetadata, MediaConnInfo, MessageReceiptType, MessageRelayOptions, MiscMessageGenerationOptions, SocketConfig, WAMessageKey } from '../Types';
 import { BinaryNode, JidWithDevice } from '../WABinary';
 import { USyncQuery } from '../WAUSync';
 export declare const makeMessagesSocket: (config: SocketConfig) => {
-    getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<any>;
+    getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<BinaryNode>;
     reissueTcTokenAfterIdentityChange: (jid: string) => Promise<void>;
-    getLidForPn: LidResolver;
+    scheduleTcTokenPrune: () => void;
+    cancelTcTokenPrune: () => void;
+    getLidForPn: import("../Utils").LidResolver;
     cacheLidMapping: (pnJid?: string, lidJid?: string) => void;
     tcTokenStorageJid: (jid: string) => string;
     trackTcTokenJid: (jid: string) => void;
     flushTcTokenIndex: () => Promise<void>;
     withFlushedTcTokenIndex: <T>(task: () => Promise<T>) => Promise<T>;
     assertSessions: (jids: string[], force: boolean, lids?: string) => Promise<boolean>;
-    relayMessage: (jid: string, message: proto.IMessage, { messageId: msgId, participant, additionalAttributes, additionalNodes, useUserDevicesCache, useCachedGroupMetadata, statusJidList, newsletterMediaId, isretry, excludeJids, includeJids, decryptFailHide }: MessageRelayOptions) => Promise<string>;
+    relayMessage: (jid: string, message: proto.IMessage, { messageId: msgId, participant, additionalAttributes, additionalNodes, useUserDevicesCache, useCachedGroupMetadata, statusJidList, newsletterMediaId, isretry, includeJids, decryptFailHide }: MessageRelayOptions) => Promise<string>;
     sendReceipt: (jid: string, participant: string | undefined, messageIds: string[], type: MessageReceiptType) => Promise<void>;
     sendReceipts: (keys: WAMessageKey[], type: MessageReceiptType) => Promise<void>;
     readMessages: (keys: WAMessageKey[]) => Promise<void>;
@@ -27,8 +28,10 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
     createParticipantNodes: (jids: string[], message: proto.IMessage, extraAttrs?: BinaryNode["attrs"], lid?: any, meid?: any, melid?: any) => Promise<{
         nodes: BinaryNode[];
         shouldIncludeDeviceIdentity: boolean;
+        failedJids: string[];
     }>;
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<JidWithDevice[]>;
+    userDevicesCache: CacheStore;
     getSelectiveRelayContext: (groupJid: string, messageId: string) => {
         groupJid: string;
         allowedUsers: string[];
@@ -37,16 +40,6 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
     getSelectiveSentMessage: (groupJid: string, messageId: string) => proto.IMessage | undefined;
     updateMediaMessage: (message: proto.IWebMessageInfo) => Promise<proto.IWebMessageInfo>;
     sendMessage: (jid: string, content: AnyMessageContent, options?: MiscMessageGenerationOptions) => Promise<proto.WebMessageInfo | undefined>;
-    /**
-     * Envia uma mensagem em grupo apenas para um participante (targetJid).
-     * Só o target recebe a mensagem; os demais podem ver "aguardando esta mensagem".
-     * Deve ser usada apenas para grupos.
-     *
-     * @param jid - JID do grupo (g.us)
-     * @param messageObject - Conteúdo da mensagem (só entregue ao targetJid)
-     * @param options - Opções incluindo targetJid e targetOnly0Device
-     */
-    sendSecretGroupMessage: (jid: string, messageObject: AnyMessageContent, options?: SecretGroupMessageOptions) => Promise<proto.WebMessageInfo>;
     newsletterCreate: (name: string, description?: string) => Promise<import("../Types").NewsletterMetadata>;
     newsletterUpdate: (jid: string, updates: import("../Types").NewsletterUpdate) => Promise<unknown>;
     newsletterSubscribers: (jid: string) => Promise<{
@@ -71,8 +64,8 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
     newsletterChangeOwner: (jid: string, newOwnerJid: string) => Promise<void>;
     newsletterDemote: (jid: string, userJid: string) => Promise<void>;
     newsletterDelete: (jid: string) => Promise<void>;
-    groupMetadata: (jid: string) => Promise<import("../Types").GroupMetadata>;
-    groupCreate: (subject: string, participants: string[]) => Promise<import("../Types").GroupMetadata>;
+    groupMetadata: (jid: string) => Promise<GroupMetadata>;
+    groupCreate: (subject: string, participants: string[]) => Promise<GroupMetadata>;
     groupLeave: (id: string) => Promise<void>;
     groupUpdateSubject: (jid: string, subject: string) => Promise<void>;
     groupRequestParticipantsList: (jid: string) => Promise<{
@@ -95,18 +88,28 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
     groupAcceptInvite: (code: string) => Promise<string | undefined>;
     groupRevokeInviteV4: (groupJid: string, invitedJid: string) => Promise<boolean>;
     groupAcceptInviteV4: (key: string | WAMessageKey, inviteMessage: proto.Message.IGroupInviteMessage) => Promise<any>;
-    groupGetInviteInfo: (code: string) => Promise<import("../Types").GroupMetadata>;
+    groupGetInviteInfo: (code: string) => Promise<GroupMetadata>;
     groupToggleEphemeral: (jid: string, ephemeralExpiration: number) => Promise<void>;
     groupSettingUpdate: (jid: string, setting: "announcement" | "not_announcement" | "locked" | "unlocked") => Promise<void>;
     groupMemberAddMode: (jid: string, mode: "admin_add" | "all_member_add") => Promise<void>;
     groupJoinApprovalMode: (jid: string, mode: "on" | "off") => Promise<void>;
     groupFetchAllParticipating: () => Promise<{
-        [_: string]: import("../Types").GroupMetadata;
+        [_: string]: GroupMetadata;
     }>;
     getBotListV2: () => Promise<import("../Types").BotListInfo[]>;
-    processingMutex: {
+    messageMutex: {
+        mutex<T>(chat: string, author: string, task: () => Promise<T> | T): Promise<T>;
+    };
+    receiptMutex: {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
     };
+    notificationMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    appStatePatchMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    placeholderResendCache: CacheStore;
     upsertMessage: (msg: import("../Types").WAMessage, type: import("../Types").MessageUpsertType) => Promise<void>;
     appPatch: (patchCreate: import("../Types").WAPatchCreate) => Promise<void>;
     sendPresenceUpdate: (type: import("../Types").WAPresence, toJid?: string) => Promise<void>;
@@ -179,6 +182,7 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
     logout: (msg?: string) => Promise<void>;
     end: (error: Error | undefined) => void;
     onUnexpectedError: (err: Error | Boom, msg: string) => void;
+    onSocketEnd: (handler: () => void) => void;
     uploadPreKeys: (count?: number) => Promise<void>;
     uploadPreKeysToServerIfRequired: () => Promise<void>;
     requestPairingCode: (phoneNumber: string, customPairingCode?: string) => Promise<string>;
