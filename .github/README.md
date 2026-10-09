@@ -9,10 +9,6 @@
 # Usage
 A new guide has been posted at https://baileys.wiki. The old guide can be accessed on [NPM](https://npmjs.com/package/baileys).
 
-# Contribua
-Se este repositório te ajudou de alguma forma, faça sua retribuioção e ajude a manter atualizado:
-pix/support: (64) 99213-4371
-
 
 # Disclaimer
 This project is not affiliated, associated, authorized, endorsed by, or in any way officially connected with WhatsApp or any of its subsidiaries or its affiliates.
