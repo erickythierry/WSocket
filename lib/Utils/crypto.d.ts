@@ -3,13 +3,13 @@ import { KeyPair } from '../Types';
 export declare const generateSignalPubKey: (pubKey: Uint8Array | Buffer) => Buffer;
 export declare const Curve: {
     generateKeyPair: () => KeyPair;
-    sharedKey: (privateKey: Uint8Array, publicKey: Uint8Array) => Buffer<any>;
-    sign: (privateKey: Uint8Array, buf: Uint8Array) => any;
+    sharedKey: (privateKey: Uint8Array, publicKey: Uint8Array) => Buffer<ArrayBuffer>;
+    sign: (privateKey: Uint8Array, buf: Uint8Array) => Buffer<ArrayBufferLike>;
     verify: (pubKey: Uint8Array, message: Uint8Array, signature: Uint8Array) => boolean;
 };
 export declare const signedKeyPair: (identityKeyPair: KeyPair, keyId: number) => {
     keyPair: KeyPair;
-    signature: any;
+    signature: Buffer<ArrayBufferLike>;
     keyId: number;
 };
 /**
