@@ -4840,6 +4840,9 @@ export namespace proto {
 
         /** BotMetadata botAgeCollectionMetadata */
         botAgeCollectionMetadata?: (proto.IBotAgeCollectionMetadata|null);
+
+        /** BotMetadata botThreadInfo */
+        botThreadInfo?: (proto.IAIThreadInfo|null);
     }
 
     /** Represents a BotMetadata. */
@@ -4922,6 +4925,9 @@ export namespace proto {
 
         /** BotMetadata botAgeCollectionMetadata. */
         public botAgeCollectionMetadata?: (proto.IBotAgeCollectionMetadata|null);
+
+        /** BotMetadata botThreadInfo. */
+        public botThreadInfo?: (proto.IAIThreadInfo|null);
 
         /**
          * Creates a new BotMetadata instance using the specified properties.
@@ -36059,6 +36065,9 @@ export namespace proto {
 
         /** MessageContextInfo limitSharingV2 */
         limitSharingV2?: (proto.ILimitSharing|null);
+
+        /** MessageContextInfo threadId */
+        threadId?: (proto.IThreadID[]|null);
     }
 
     /** Represents a MessageContextInfo. */
@@ -36111,6 +36120,9 @@ export namespace proto {
 
         /** MessageContextInfo limitSharingV2. */
         public limitSharingV2?: (proto.ILimitSharing|null);
+
+        /** MessageContextInfo threadId. */
+        public threadId: proto.IThreadID[];
 
         /**
          * Creates a new MessageContextInfo instance using the specified properties.
@@ -53745,5 +53757,326 @@ export namespace proto {
          * @returns The default type url
          */
         public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    /** Properties of a ThreadID. */
+    interface IThreadID {
+
+        /** ThreadID threadType */
+        threadType?: (proto.ThreadID.ThreadType|null);
+
+        /** ThreadID threadKey */
+        threadKey?: (proto.IMessageKey|null);
+    }
+
+    /** Represents a ThreadID. */
+    class ThreadID implements IThreadID {
+
+        /**
+         * Constructs a new ThreadID.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: proto.IThreadID);
+
+        /** ThreadID threadType. */
+        public threadType: proto.ThreadID.ThreadType;
+
+        /** ThreadID threadKey. */
+        public threadKey?: (proto.IMessageKey|null);
+
+        /**
+         * Creates a new ThreadID instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns ThreadID instance
+         */
+        public static create(properties?: proto.IThreadID): proto.ThreadID;
+
+        /**
+         * Encodes the specified ThreadID message. Does not implicitly {@link proto.ThreadID.verify|verify} messages.
+         * @param message ThreadID message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: proto.IThreadID, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified ThreadID message, length delimited. Does not implicitly {@link proto.ThreadID.verify|verify} messages.
+         * @param message ThreadID message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: proto.IThreadID, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a ThreadID message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns ThreadID
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): proto.ThreadID;
+
+        /**
+         * Decodes a ThreadID message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns ThreadID
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): proto.ThreadID;
+
+        /**
+         * Verifies a ThreadID message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a ThreadID message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns ThreadID
+         */
+        public static fromObject(object: { [k: string]: any }): proto.ThreadID;
+
+        /**
+         * Creates a plain object from a ThreadID message. Also converts values to other types if specified.
+         * @param message ThreadID
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: proto.ThreadID, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this ThreadID to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for ThreadID
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    namespace ThreadID {
+
+        /** ThreadType enum. */
+        enum ThreadType {
+            UNKNOWN = 0,
+            VIEW_REPLIES = 1,
+            AI_THREAD = 2
+        }
+    }
+
+    /** Properties of a AIThreadInfo. */
+    interface IAIThreadInfo {
+
+        /** AIThreadInfo clientInfo */
+        clientInfo?: (proto.AIThreadInfo.IAIThreadClientInfo|null);
+    }
+
+    /** Represents a AIThreadInfo. */
+    class AIThreadInfo implements IAIThreadInfo {
+
+        /**
+         * Constructs a new AIThreadInfo.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: proto.IAIThreadInfo);
+
+        /** AIThreadInfo clientInfo. */
+        public clientInfo?: (proto.AIThreadInfo.IAIThreadClientInfo|null);
+
+        /**
+         * Creates a new AIThreadInfo instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns AIThreadInfo instance
+         */
+        public static create(properties?: proto.IAIThreadInfo): proto.AIThreadInfo;
+
+        /**
+         * Encodes the specified AIThreadInfo message. Does not implicitly {@link proto.AIThreadInfo.verify|verify} messages.
+         * @param message AIThreadInfo message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: proto.IAIThreadInfo, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified AIThreadInfo message, length delimited. Does not implicitly {@link proto.AIThreadInfo.verify|verify} messages.
+         * @param message AIThreadInfo message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: proto.IAIThreadInfo, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a AIThreadInfo message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns AIThreadInfo
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): proto.AIThreadInfo;
+
+        /**
+         * Decodes a AIThreadInfo message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns AIThreadInfo
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): proto.AIThreadInfo;
+
+        /**
+         * Verifies a AIThreadInfo message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a AIThreadInfo message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns AIThreadInfo
+         */
+        public static fromObject(object: { [k: string]: any }): proto.AIThreadInfo;
+
+        /**
+         * Creates a plain object from a AIThreadInfo message. Also converts values to other types if specified.
+         * @param message AIThreadInfo
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: proto.AIThreadInfo, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this AIThreadInfo to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for AIThreadInfo
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    namespace AIThreadInfo {
+
+        /** Properties of a AIThreadClientInfo. */
+        interface IAIThreadClientInfo {
+
+            /** AIThreadClientInfo type */
+            type?: (proto.AIThreadInfo.AIThreadClientInfo.AIThreadType|null);
+        }
+
+        /** Represents a AIThreadClientInfo. */
+        class AIThreadClientInfo implements IAIThreadClientInfo {
+
+            /**
+             * Constructs a new AIThreadClientInfo.
+             * @param [properties] Properties to set
+             */
+            constructor(properties?: proto.AIThreadInfo.IAIThreadClientInfo);
+
+            /** AIThreadClientInfo type. */
+            public type: proto.AIThreadInfo.AIThreadClientInfo.AIThreadType;
+
+            /**
+             * Creates a new AIThreadClientInfo instance using the specified properties.
+             * @param [properties] Properties to set
+             * @returns AIThreadClientInfo instance
+             */
+            public static create(properties?: proto.AIThreadInfo.IAIThreadClientInfo): proto.AIThreadInfo.AIThreadClientInfo;
+
+            /**
+             * Encodes the specified AIThreadClientInfo message. Does not implicitly {@link proto.AIThreadInfo.AIThreadClientInfo.verify|verify} messages.
+             * @param message AIThreadClientInfo message or plain object to encode
+             * @param [writer] Writer to encode to
+             * @returns Writer
+             */
+            public static encode(message: proto.AIThreadInfo.IAIThreadClientInfo, writer?: $protobuf.Writer): $protobuf.Writer;
+
+            /**
+             * Encodes the specified AIThreadClientInfo message, length delimited. Does not implicitly {@link proto.AIThreadInfo.AIThreadClientInfo.verify|verify} messages.
+             * @param message AIThreadClientInfo message or plain object to encode
+             * @param [writer] Writer to encode to
+             * @returns Writer
+             */
+            public static encodeDelimited(message: proto.AIThreadInfo.IAIThreadClientInfo, writer?: $protobuf.Writer): $protobuf.Writer;
+
+            /**
+             * Decodes a AIThreadClientInfo message from the specified reader or buffer.
+             * @param reader Reader or buffer to decode from
+             * @param [length] Message length if known beforehand
+             * @returns AIThreadClientInfo
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): proto.AIThreadInfo.AIThreadClientInfo;
+
+            /**
+             * Decodes a AIThreadClientInfo message from the specified reader or buffer, length delimited.
+             * @param reader Reader or buffer to decode from
+             * @returns AIThreadClientInfo
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): proto.AIThreadInfo.AIThreadClientInfo;
+
+            /**
+             * Verifies a AIThreadClientInfo message.
+             * @param message Plain object to verify
+             * @returns `null` if valid, otherwise the reason why it is not
+             */
+            public static verify(message: { [k: string]: any }): (string|null);
+
+            /**
+             * Creates a AIThreadClientInfo message from a plain object. Also converts values to their respective internal types.
+             * @param object Plain object
+             * @returns AIThreadClientInfo
+             */
+            public static fromObject(object: { [k: string]: any }): proto.AIThreadInfo.AIThreadClientInfo;
+
+            /**
+             * Creates a plain object from a AIThreadClientInfo message. Also converts values to other types if specified.
+             * @param message AIThreadClientInfo
+             * @param [options] Conversion options
+             * @returns Plain object
+             */
+            public static toObject(message: proto.AIThreadInfo.AIThreadClientInfo, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+            /**
+             * Converts this AIThreadClientInfo to JSON.
+             * @returns JSON object
+             */
+            public toJSON(): { [k: string]: any };
+
+            /**
+             * Gets the default type url for AIThreadClientInfo
+             * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+             * @returns The default type url
+             */
+            public static getTypeUrl(typeUrlPrefix?: string): string;
+        }
+
+        namespace AIThreadClientInfo {
+
+            /** AIThreadType enum. */
+            enum AIThreadType {
+                UNKNOWN = 0,
+                DEFAULT = 1,
+                INCOGNITO = 2,
+                SIDE_CHAT = 3
+            }
+        }
     }
 }

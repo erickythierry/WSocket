@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto'
 import NodeCache from '@cacheable/node-cache'
 import { Boom } from '@hapi/boom'
 import { proto } from '../../WAProto'
@@ -35,6 +36,7 @@ import {
 	encodeNewsletterMessage
 } from '../Utils'
 import { buildInteractiveBizNode, groupStatusNodes, unwrapGroupStatus } from '../Utils/business-node'
+import { buildMetaAiPrompt, META_AI_BOT_JID } from '../Utils/meta-ai'
 import { getUrlInfo } from '../Utils/link-preview'
 import { BoundedTtlMap } from '../Utils/bounded-ttl-map'
 import { makeKeyedMutex } from '../Utils/make-mutex'
@@ -86,6 +88,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	// guardam a mensagem inteira: teto de entradas e 15 min (retry chega em segundos), sem timer por socket
 	const selectiveRelayCache = new BoundedTtlMap<string, SelectiveRelayContext>(500, 15 * 60 * 1000)
 	const selectiveMessageCache = new BoundedTtlMap<string, proto.IMessage>(500, 15 * 60 * 1000)
+	// shortcut: só em memória, chunk de prompt enviado antes de um restart é descartado
+	const metaAiSecrets = new BoundedTtlMap<string, Uint8Array>(1000, 15 * 60 * 1000)
 
 	const {
 		ev,
@@ -603,6 +607,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		const isStatus = jid === statusJid
 		const isLid = server === 'lid'
 		const isNewsletter = server === 'newsletter'
+		const isBot = server === 'bot'
 		// Relays seletivos ocultam por padrão a falha de decrypt nos devices que não receberam
 		// o SKDM. O chamador ainda pode usar decryptFailHide:false para observar o placeholder.
 		const shouldHideDecryptFailure = decryptFailHide ?? !!includeJids?.length
@@ -614,7 +619,9 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		useCachedGroupMetadata = useCachedGroupMetadata !== false && !isStatus
 
 		const participants: BinaryNode[] = []
-		const destinationJid = !isStatus ? jidEncode(user, isLid ? 'lid' : isGroup ? 'g.us' : 's.whatsapp.net') : statusJid
+		const destinationJid = !isStatus
+			? jidEncode(user, isLid ? 'lid' : isGroup ? 'g.us' : isBot ? 'bot' : 's.whatsapp.net')
+			: statusJid
 		const binaryNodeContent: BinaryNode[] = []
 		const devices: JidWithDevice[] = []
 		let selectiveAllowedUsers: Set<string> | undefined
@@ -1152,6 +1159,26 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		createParticipantNodes,
 		getUSyncDevices,
 		userDevicesCache,
+		getMetaAiPromptSecret: (messageId: string) => metaAiSecrets.get(messageId),
+		/** manda um prompt para a Meta AI; a resposta chega pelo evento `messages.bot-chunk` com `targetMessageId` = `key.id` */
+		sendMetaAiPrompt: async (text: string, { aiThreadId }: { aiThreadId?: string } = {}) => {
+			const messageSecret = randomBytes(32)
+			const prompt = buildMetaAiPrompt({ conversation: text }, { aiThreadId, messageSecret })
+			const messageId = generateMessageIDV2(sock.user?.id)
+			// antes do relay: o primeiro chunk pode chegar antes do relayMessage resolver
+			metaAiSecrets.set(messageId, messageSecret)
+			await relayMessage(META_AI_BOT_JID, prompt.message, { messageId })
+
+			return { key: { remoteJid: META_AI_BOT_JID, fromMe: true, id: messageId }, aiThreadId: prompt.aiThreadId }
+		},
+		/** a Meta AI perde a sessão Signal depois de horas: o prompt tem ack e nenhum chunk volta. Apagar força uma nova */
+		resetMetaAiSession: async () => {
+			const devices = await getUSyncDevices([META_AI_BOT_JID], false, false)
+			const addrs = [META_AI_BOT_JID, ...devices.map(d => jidEncode(d.user, 'bot', d.device))].map(jid =>
+				signalRepository.jidToSignalProtocolAddress(jid)
+			)
+			await authState.keys.set({ session: Object.fromEntries(addrs.map(addr => [addr, null])) })
+		},
 		getSelectiveRelayContext: (groupJid: string, messageId: string) =>
 			selectiveRelayCache.get(`${groupJid}:${messageId}`),
 		getSelectiveSentMessage: (groupJid: string, messageId: string) =>

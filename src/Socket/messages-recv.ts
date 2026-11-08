@@ -56,6 +56,7 @@ import {
 	getBinaryNodeChildren,
 	getBinaryNodeChildString,
 	isJidGroup,
+	isJidMetaIa,
 	isJidStatusBroadcast,
 	isJidUser,
 	isLidUser,
@@ -66,6 +67,7 @@ import {
 } from '../WABinary'
 import { extractGroupMetadata } from './groups'
 import { BoundedTtlMap } from '../Utils/bounded-ttl-map'
+import { decryptBotChunk, parseBotChunkNode } from '../Utils/meta-ai'
 import caches from '../Utils/cache-utils'
 import { makeMessagesSocket } from './messages-send'
 
@@ -92,6 +94,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		getUSyncDevices,
 		getSelectiveRelayContext,
 		getSelectiveSentMessage,
+		getMetaAiPromptSecret,
 		sendReceipt,
 		uploadPreKeys,
 		sendPeerDataOperationMessage,
@@ -1066,6 +1069,45 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 	}
 
+	/** chunk da Meta AI: AES-GCM com chave derivada do messageSecret do prompt, fora do Signal */
+	const handleBotChunk = (node: BinaryNode) => {
+		const chunk = parseBotChunkNode(node, authState.creds.me?.lid, authState.creds.me?.id)
+		if (!chunk) {
+			logger.debug({ id: node.attrs.id }, 'msmsg sem <bot>, ignorado')
+			return
+		}
+
+		try {
+			const { encIv, encPayload } = proto.MessageSecretMessage.decode(chunk.payload)
+			const { targetMessageId } = chunk
+			const parentMessageSecret = targetMessageId ? getMetaAiPromptSecret(targetMessageId) : undefined
+			if (!encIv || !encPayload || !targetMessageId || !parentMessageSecret) {
+				logger.debug({ id: node.attrs.id, targetMessageId }, 'chunk de bot sem prompt conhecido, ignorado')
+				return
+			}
+
+			const message = proto.Message.decode(
+				decryptBotChunk({
+					parentMessageSecret,
+					saltId: chunk.saltId,
+					targetSenderJid: chunk.targetSenderJid,
+					authorJid: chunk.authorJid,
+					encIv,
+					encPayload
+				})
+			)
+			ev.emit('messages.bot-chunk', {
+				key: { remoteJid: node.attrs.from, fromMe: false, id: node.attrs.id },
+				targetMessageId,
+				editType: chunk.editType,
+				editTargetId: chunk.editTargetId,
+				message
+			})
+		} catch (err) {
+			logger.warn({ err, id: node.attrs.id, editType: chunk.editType }, 'falha ao decifrar chunk de bot')
+		}
+	}
+
 	const handleMessage = async (node: BinaryNode) => {
 		let acked = false
 		const ack = async (errorCode?: number) => {
@@ -1078,16 +1120,21 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 
 		try {
-			if (shouldIgnoreJid(node.attrs.from) && node.attrs.from !== '@s.whatsapp.net') {
-				logger.debug({ key: node.attrs.key }, 'ignored message')
+			// antes do shouldIgnoreJid: os consumidores ignoram `@bot`, e o chunk só decifra se o prompt for nosso
+			if (getBinaryNodeChildren(node, 'enc').some(enc => enc.attrs.type === 'msmsg')) {
+				handleBotChunk(node)
+				// só para o bot: em grupo a resposta a quem invocou a Meta AI chega para todos os membros
+				if (isJidMetaIa(node.attrs.from)) {
+					await sendReceipt(node.attrs.from, undefined, [node.attrs.id], sendActiveReceipts ? undefined : 'inactive').catch(
+						err => logger.warn({ err, id: node.attrs.id }, 'falha ao enviar recibo do chunk')
+					)
+				}
+
 				return
 			}
 
-			const encNode = getBinaryNodeChild(node, 'enc')
-
-			// TODO: temporary fix for crashes and issues resulting of failed msmsg decryption
-			if (encNode?.attrs.type === 'msmsg') {
-				logger.debug({ key: node.attrs.key }, 'ignored msmsg')
+			if (shouldIgnoreJid(node.attrs.from) && node.attrs.from !== '@s.whatsapp.net') {
+				logger.debug({ key: node.attrs.key }, 'ignored message')
 				return
 			}
 

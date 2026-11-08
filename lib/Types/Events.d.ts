@@ -73,6 +73,18 @@ export type BaileysEventMap = {
         key: WAMessageKey;
         reaction: proto.IReaction;
     }[];
+    /**
+     * pedaço da resposta da Meta AI a um `sendMetaAiPrompt`. Cada `inner`/`last` traz a resposta inteira até ali
+     * (edit em `protocolMessage.editedMessage`), não um pedaço para concatenar; a resposta termina em `last` ou `full`.
+     * O conteúdo costuma vir em `richResponseMessage.submessages` (texto, tabela, código), não em `conversation`
+     */
+    'messages.bot-chunk': {
+        key: WAMessageKey;
+        targetMessageId: string;
+        editType: 'first' | 'inner' | 'last' | 'full';
+        editTargetId?: string;
+        message: proto.IMessage;
+    };
     'message-receipt.update': MessageUserReceiptUpdate[];
     'groups.upsert': GroupMetadata[];
     'groups.update': Partial<GroupMetadata>[];

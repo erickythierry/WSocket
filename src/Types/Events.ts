@@ -49,6 +49,18 @@ export type BaileysEventMap = {
 	'messages.upsert': { messages: WAMessage[]; type: MessageUpsertType; requestId?: string }
 	/** message was reacted to. If reaction was removed -- then "reaction.text" will be falsey */
 	'messages.reaction': { key: WAMessageKey; reaction: proto.IReaction }[]
+	/**
+	 * pedaço da resposta da Meta AI a um `sendMetaAiPrompt`. Cada `inner`/`last` traz a resposta inteira até ali
+	 * (edit em `protocolMessage.editedMessage`), não um pedaço para concatenar; a resposta termina em `last` ou `full`.
+	 * O conteúdo costuma vir em `richResponseMessage.submessages` (texto, tabela, código), não em `conversation`
+	 */
+	'messages.bot-chunk': {
+		key: WAMessageKey
+		targetMessageId: string
+		editType: 'first' | 'inner' | 'last' | 'full'
+		editTargetId?: string
+		message: proto.IMessage
+	}
 
 	'message-receipt.update': MessageUserReceiptUpdate[]
 

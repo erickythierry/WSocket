@@ -12851,6 +12851,7 @@ $root.proto = (function() {
          * @property {proto.IBotModeSelectionMetadata|null} [botModeSelectionMetadata] BotMetadata botModeSelectionMetadata
          * @property {proto.IBotQuotaMetadata|null} [botQuotaMetadata] BotMetadata botQuotaMetadata
          * @property {proto.IBotAgeCollectionMetadata|null} [botAgeCollectionMetadata] BotMetadata botAgeCollectionMetadata
+         * @property {proto.IAIThreadInfo|null} [botThreadInfo] BotMetadata botThreadInfo
          */
 
         /**
@@ -13061,6 +13062,14 @@ $root.proto = (function() {
         BotMetadata.prototype.botAgeCollectionMetadata = null;
 
         /**
+         * BotMetadata botThreadInfo.
+         * @member {proto.IAIThreadInfo|null|undefined} botThreadInfo
+         * @memberof proto.BotMetadata
+         * @instance
+         */
+        BotMetadata.prototype.botThreadInfo = null;
+
+        /**
          * Creates a new BotMetadata instance using the specified properties.
          * @function create
          * @memberof proto.BotMetadata
@@ -13132,6 +13141,8 @@ $root.proto = (function() {
                 $root.proto.BotQuotaMetadata.encode(message.botQuotaMetadata, writer.uint32(/* id 23, wireType 2 =*/186).fork()).ldelim();
             if (message.botAgeCollectionMetadata != null && Object.hasOwnProperty.call(message, "botAgeCollectionMetadata"))
                 $root.proto.BotAgeCollectionMetadata.encode(message.botAgeCollectionMetadata, writer.uint32(/* id 24, wireType 2 =*/194).fork()).ldelim();
+            if (message.botThreadInfo != null && Object.hasOwnProperty.call(message, "botThreadInfo"))
+                $root.proto.AIThreadInfo.encode(message.botThreadInfo, writer.uint32(/* id 31, wireType 2 =*/250).fork()).ldelim();
             return writer;
         };
 
@@ -13266,6 +13277,10 @@ $root.proto = (function() {
                     }
                 case 24: {
                         message.botAgeCollectionMetadata = $root.proto.BotAgeCollectionMetadata.decode(reader, reader.uint32(), undefined, long + 1);
+                        break;
+                    }
+                case 31: {
+                        message.botThreadInfo = $root.proto.AIThreadInfo.decode(reader, reader.uint32(), undefined, long + 1);
                         break;
                     }
                 default:
@@ -13417,6 +13432,11 @@ $root.proto = (function() {
                 if (error)
                     return "botAgeCollectionMetadata." + error;
             }
+            if (message.botThreadInfo != null && message.hasOwnProperty("botThreadInfo")) {
+                var error = $root.proto.AIThreadInfo.verify(message.botThreadInfo, long + 1);
+                if (error)
+                    return "botThreadInfo." + error;
+            }
             return null;
         };
 
@@ -13544,6 +13564,11 @@ $root.proto = (function() {
                     throw TypeError(".proto.BotMetadata.botAgeCollectionMetadata: object expected");
                 message.botAgeCollectionMetadata = $root.proto.BotAgeCollectionMetadata.fromObject(object.botAgeCollectionMetadata, long + 1);
             }
+            if (object.botThreadInfo != null) {
+                if (typeof object.botThreadInfo !== "object")
+                    throw TypeError(".proto.BotMetadata.botThreadInfo: object expected");
+                message.botThreadInfo = $root.proto.AIThreadInfo.fromObject(object.botThreadInfo, long + 1);
+            }
             return message;
         };
 
@@ -13591,6 +13616,7 @@ $root.proto = (function() {
                 object.botModeSelectionMetadata = null;
                 object.botQuotaMetadata = null;
                 object.botAgeCollectionMetadata = null;
+                object.botThreadInfo = null;
             }
             if (message.avatarMetadata != null && message.hasOwnProperty("avatarMetadata"))
                 object.avatarMetadata = $root.proto.BotAvatarMetadata.toObject(message.avatarMetadata, options);
@@ -13640,6 +13666,8 @@ $root.proto = (function() {
                 object.botQuotaMetadata = $root.proto.BotQuotaMetadata.toObject(message.botQuotaMetadata, options);
             if (message.botAgeCollectionMetadata != null && message.hasOwnProperty("botAgeCollectionMetadata"))
                 object.botAgeCollectionMetadata = $root.proto.BotAgeCollectionMetadata.toObject(message.botAgeCollectionMetadata, options);
+            if (message.botThreadInfo != null && message.hasOwnProperty("botThreadInfo"))
+                object.botThreadInfo = $root.proto.AIThreadInfo.toObject(message.botThreadInfo, options);
             return object;
         };
 
@@ -30785,10 +30813,6 @@ $root.proto = (function() {
                 writer.uint32(/* id 59, wireType 0 =*/472).int32(message.pairedMediaType);
             if (message.rankingVersion != null && Object.hasOwnProperty.call(message, "rankingVersion"))
                 writer.uint32(/* id 60, wireType 0 =*/480).uint32(message.rankingVersion);
-            if (message.afterReadDuration != null && Object.hasOwnProperty.call(message, "afterReadDuration"))
-                writer.uint32(/* id 76, wireType 0 =*/608).uint32(message.afterReadDuration);
-            if (message.isSpoiler != null && Object.hasOwnProperty.call(message, "isSpoiler"))
-                writer.uint32(/* id 73, wireType 0 =*/584).bool(message.isSpoiler);
             if (message.memberLabel != null && Object.hasOwnProperty.call(message, "memberLabel"))
                 $root.proto.MemberLabel.encode(message.memberLabel, writer.uint32(/* id 62, wireType 2 =*/498).fork()).ldelim();
             if (message.isQuestion != null && Object.hasOwnProperty.call(message, "isQuestion"))
@@ -30799,6 +30823,10 @@ $root.proto = (function() {
                 writer.uint32(/* id 66, wireType 0 =*/528).bool(message.isGroupStatus);
             if (message.forwardOrigin != null && Object.hasOwnProperty.call(message, "forwardOrigin"))
                 writer.uint32(/* id 67, wireType 0 =*/536).int32(message.forwardOrigin);
+            if (message.isSpoiler != null && Object.hasOwnProperty.call(message, "isSpoiler"))
+                writer.uint32(/* id 73, wireType 0 =*/584).bool(message.isSpoiler);
+            if (message.afterReadDuration != null && Object.hasOwnProperty.call(message, "afterReadDuration"))
+                writer.uint32(/* id 76, wireType 0 =*/608).uint32(message.afterReadDuration);
             return writer;
         };
 
@@ -31700,13 +31728,13 @@ $root.proto = (function() {
                 object.urlTrackingMap = null;
                 object.pairedMediaType = options.enums === String ? "NOT_PAIRED_MEDIA" : 0;
                 object.rankingVersion = 0;
-                object.afterReadDuration = 0;
-                object.isSpoiler = false;
                 object.memberLabel = null;
                 object.isQuestion = false;
                 object.statusSourceType = options.enums === String ? "IMAGE" : 0;
                 object.isGroupStatus = false;
                 object.forwardOrigin = options.enums === String ? "UNKNOWN" : 0;
+                object.isSpoiler = false;
+                object.afterReadDuration = 0;
             }
             if (message.stanzaId != null && message.hasOwnProperty("stanzaId"))
                 object.stanzaId = message.stanzaId;
@@ -31807,10 +31835,6 @@ $root.proto = (function() {
                 object.pairedMediaType = options.enums === String ? $root.proto.ContextInfo.PairedMediaType[message.pairedMediaType] === undefined ? message.pairedMediaType : $root.proto.ContextInfo.PairedMediaType[message.pairedMediaType] : message.pairedMediaType;
             if (message.rankingVersion != null && message.hasOwnProperty("rankingVersion"))
                 object.rankingVersion = message.rankingVersion;
-            if (message.afterReadDuration != null && message.hasOwnProperty("afterReadDuration"))
-                object.afterReadDuration = message.afterReadDuration;
-            if (message.isSpoiler != null && message.hasOwnProperty("isSpoiler"))
-                object.isSpoiler = message.isSpoiler;
             if (message.memberLabel != null && message.hasOwnProperty("memberLabel"))
                 object.memberLabel = $root.proto.MemberLabel.toObject(message.memberLabel, options);
             if (message.isQuestion != null && message.hasOwnProperty("isQuestion"))
@@ -31821,6 +31845,10 @@ $root.proto = (function() {
                 object.isGroupStatus = message.isGroupStatus;
             if (message.forwardOrigin != null && message.hasOwnProperty("forwardOrigin"))
                 object.forwardOrigin = options.enums === String ? $root.proto.ContextInfo.ForwardOrigin[message.forwardOrigin] === undefined ? message.forwardOrigin : $root.proto.ContextInfo.ForwardOrigin[message.forwardOrigin] : message.forwardOrigin;
+            if (message.isSpoiler != null && message.hasOwnProperty("isSpoiler"))
+                object.isSpoiler = message.isSpoiler;
+            if (message.afterReadDuration != null && message.hasOwnProperty("afterReadDuration"))
+                object.afterReadDuration = message.afterReadDuration;
             return object;
         };
 
@@ -53363,8 +53391,6 @@ $root.proto = (function() {
                 $root.proto.Message.ListResponseMessage.encode(message.listResponseMessage, writer.uint32(/* id 39, wireType 2 =*/314).fork()).ldelim();
             if (message.ephemeralMessage != null && Object.hasOwnProperty.call(message, "ephemeralMessage"))
                 $root.proto.Message.FutureProofMessage.encode(message.ephemeralMessage, writer.uint32(/* id 40, wireType 2 =*/322).fork()).ldelim();
-            if (message.spoilerMessage != null && Object.hasOwnProperty.call(message, "spoilerMessage"))
-                $root.proto.Message.FutureProofMessage.encode(message.spoilerMessage, writer.uint32(/* id 118, wireType 2 =*/946).fork()).ldelim();
             if (message.invoiceMessage != null && Object.hasOwnProperty.call(message, "invoiceMessage"))
                 $root.proto.Message.InvoiceMessage.encode(message.invoiceMessage, writer.uint32(/* id 41, wireType 2 =*/330).fork()).ldelim();
             if (message.buttonsMessage != null && Object.hasOwnProperty.call(message, "buttonsMessage"))
@@ -53479,6 +53505,8 @@ $root.proto = (function() {
                 $root.proto.Message.FutureProofMessage.encode(message.botForwardedMessage, writer.uint32(/* id 104, wireType 2 =*/834).fork()).ldelim();
             if (message.questionResponseMessage != null && Object.hasOwnProperty.call(message, "questionResponseMessage"))
                 $root.proto.QuestionResponseMessage.encode(message.questionResponseMessage, writer.uint32(/* id 107, wireType 2 =*/858).fork()).ldelim();
+            if (message.spoilerMessage != null && Object.hasOwnProperty.call(message, "spoilerMessage"))
+                $root.proto.Message.FutureProofMessage.encode(message.spoilerMessage, writer.uint32(/* id 118, wireType 2 =*/946).fork()).ldelim();
             return writer;
         };
 
@@ -54881,7 +54909,6 @@ $root.proto = (function() {
                 object.orderMessage = null;
                 object.listResponseMessage = null;
                 object.ephemeralMessage = null;
-                object.spoilerMessage = null;
                 object.invoiceMessage = null;
                 object.buttonsMessage = null;
                 object.buttonsResponseMessage = null;
@@ -54939,6 +54966,7 @@ $root.proto = (function() {
                 object.groupStatusMessageV2 = null;
                 object.botForwardedMessage = null;
                 object.questionResponseMessage = null;
+                object.spoilerMessage = null;
             }
             if (message.conversation != null && message.hasOwnProperty("conversation"))
                 object.conversation = message.conversation;
@@ -55004,8 +55032,6 @@ $root.proto = (function() {
                 object.listResponseMessage = $root.proto.Message.ListResponseMessage.toObject(message.listResponseMessage, options);
             if (message.ephemeralMessage != null && message.hasOwnProperty("ephemeralMessage"))
                 object.ephemeralMessage = $root.proto.Message.FutureProofMessage.toObject(message.ephemeralMessage, options);
-            if (message.spoilerMessage != null && message.hasOwnProperty("spoilerMessage"))
-                object.spoilerMessage = $root.proto.Message.FutureProofMessage.toObject(message.spoilerMessage, options);
             if (message.invoiceMessage != null && message.hasOwnProperty("invoiceMessage"))
                 object.invoiceMessage = $root.proto.Message.InvoiceMessage.toObject(message.invoiceMessage, options);
             if (message.buttonsMessage != null && message.hasOwnProperty("buttonsMessage"))
@@ -55120,6 +55146,8 @@ $root.proto = (function() {
                 object.botForwardedMessage = $root.proto.Message.FutureProofMessage.toObject(message.botForwardedMessage, options);
             if (message.questionResponseMessage != null && message.hasOwnProperty("questionResponseMessage"))
                 object.questionResponseMessage = $root.proto.QuestionResponseMessage.toObject(message.questionResponseMessage, options);
+            if (message.spoilerMessage != null && message.hasOwnProperty("spoilerMessage"))
+                object.spoilerMessage = $root.proto.Message.FutureProofMessage.toObject(message.spoilerMessage, options);
             return object;
         };
 
@@ -103287,6 +103315,7 @@ $root.proto = (function() {
          * @property {string|null} [supportPayload] MessageContextInfo supportPayload
          * @property {proto.ILimitSharing|null} [limitSharing] MessageContextInfo limitSharing
          * @property {proto.ILimitSharing|null} [limitSharingV2] MessageContextInfo limitSharingV2
+         * @property {Array.<proto.IThreadID>|null} [threadId] MessageContextInfo threadId
          */
 
         /**
@@ -103298,6 +103327,7 @@ $root.proto = (function() {
          * @param {proto.IMessageContextInfo=} [properties] Properties to set
          */
         function MessageContextInfo(properties) {
+            this.threadId = [];
             if (properties)
                 for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
                     if (properties[keys[i]] != null && keys[i] !== "__proto__")
@@ -103417,6 +103447,14 @@ $root.proto = (function() {
         MessageContextInfo.prototype.limitSharingV2 = null;
 
         /**
+         * MessageContextInfo threadId.
+         * @member {Array.<proto.IThreadID>} threadId
+         * @memberof proto.MessageContextInfo
+         * @instance
+         */
+        MessageContextInfo.prototype.threadId = $util.emptyArray;
+
+        /**
          * Creates a new MessageContextInfo instance using the specified properties.
          * @function create
          * @memberof proto.MessageContextInfo
@@ -103468,6 +103506,9 @@ $root.proto = (function() {
                 $root.proto.LimitSharing.encode(message.limitSharing, writer.uint32(/* id 13, wireType 2 =*/106).fork()).ldelim();
             if (message.limitSharingV2 != null && Object.hasOwnProperty.call(message, "limitSharingV2"))
                 $root.proto.LimitSharing.encode(message.limitSharingV2, writer.uint32(/* id 14, wireType 2 =*/114).fork()).ldelim();
+            if (message.threadId != null && message.threadId.length)
+                for (var i = 0; i < message.threadId.length; ++i)
+                    $root.proto.ThreadID.encode(message.threadId[i], writer.uint32(/* id 15, wireType 2 =*/122).fork()).ldelim();
             return writer;
         };
 
@@ -103562,6 +103603,12 @@ $root.proto = (function() {
                     }
                 case 14: {
                         message.limitSharingV2 = $root.proto.LimitSharing.decode(reader, reader.uint32(), undefined, long + 1);
+                        break;
+                    }
+                case 15: {
+                        if (!(message.threadId && message.threadId.length))
+                            message.threadId = [];
+                        message.threadId.push($root.proto.ThreadID.decode(reader, reader.uint32(), undefined, long + 1));
                         break;
                     }
                 default:
@@ -103660,6 +103707,15 @@ $root.proto = (function() {
                 if (error)
                     return "limitSharingV2." + error;
             }
+            if (message.threadId != null && message.hasOwnProperty("threadId")) {
+                if (!Array.isArray(message.threadId))
+                    return "threadId: array expected";
+                for (var i = 0; i < message.threadId.length; ++i) {
+                    var error = $root.proto.ThreadID.verify(message.threadId[i], long + 1);
+                    if (error)
+                        return "threadId." + error;
+                }
+            }
             return null;
         };
 
@@ -103745,6 +103801,16 @@ $root.proto = (function() {
                     throw TypeError(".proto.MessageContextInfo.limitSharingV2: object expected");
                 message.limitSharingV2 = $root.proto.LimitSharing.fromObject(object.limitSharingV2, long + 1);
             }
+            if (object.threadId) {
+                if (!Array.isArray(object.threadId))
+                    throw TypeError(".proto.MessageContextInfo.threadId: array expected");
+                message.threadId = [];
+                for (var i = 0; i < object.threadId.length; ++i) {
+                    if (typeof object.threadId[i] !== "object")
+                        throw TypeError(".proto.MessageContextInfo.threadId: object expected");
+                    message.threadId[i] = $root.proto.ThreadID.fromObject(object.threadId[i], long + 1);
+                }
+            }
             return message;
         };
 
@@ -103761,6 +103827,8 @@ $root.proto = (function() {
             if (!options)
                 options = {};
             var object = {};
+            if (options.arrays || options.defaults)
+                object.threadId = [];
             if (options.defaults) {
                 object.deviceListMetadata = null;
                 object.deviceListMetadataVersion = 0;
@@ -103823,6 +103891,11 @@ $root.proto = (function() {
                 object.limitSharing = $root.proto.LimitSharing.toObject(message.limitSharing, options);
             if (message.limitSharingV2 != null && message.hasOwnProperty("limitSharingV2"))
                 object.limitSharingV2 = $root.proto.LimitSharing.toObject(message.limitSharingV2, options);
+            if (message.threadId && message.threadId.length) {
+                object.threadId = [];
+                for (var j = 0; j < message.threadId.length; ++j)
+                    object.threadId[j] = $root.proto.ThreadID.toObject(message.threadId[j], options);
+            }
             return object;
         };
 
@@ -103951,7 +104024,7 @@ $root.proto = (function() {
          * @returns {$protobuf.Writer} Writer
          */
         QuestionResponseMessage.encodeDelimited = function encodeDelimited(message, writer) {
-            return this.encode(message, writer).ldelim();
+            return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
         };
 
         /**
@@ -153673,6 +153746,778 @@ $root.proto = (function() {
         };
 
         return WebNotificationsInfo;
+    })();
+
+    proto.ThreadID = (function() {
+
+        /**
+         * Properties of a ThreadID.
+         * @memberof proto
+         * @interface IThreadID
+         * @property {proto.ThreadID.ThreadType|null} [threadType] ThreadID threadType
+         * @property {proto.IMessageKey|null} [threadKey] ThreadID threadKey
+         */
+
+        /**
+         * Constructs a new ThreadID.
+         * @memberof proto
+         * @classdesc Represents a ThreadID.
+         * @implements IThreadID
+         * @constructor
+         * @param {proto.IThreadID=} [properties] Properties to set
+         */
+        function ThreadID(properties) {
+            if (properties)
+                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * ThreadID threadType.
+         * @member {proto.ThreadID.ThreadType} threadType
+         * @memberof proto.ThreadID
+         * @instance
+         */
+        ThreadID.prototype.threadType = 0;
+
+        /**
+         * ThreadID threadKey.
+         * @member {proto.IMessageKey|null|undefined} threadKey
+         * @memberof proto.ThreadID
+         * @instance
+         */
+        ThreadID.prototype.threadKey = null;
+
+        /**
+         * Creates a new ThreadID instance using the specified properties.
+         * @function create
+         * @memberof proto.ThreadID
+         * @static
+         * @param {proto.IThreadID=} [properties] Properties to set
+         * @returns {proto.ThreadID} ThreadID instance
+         */
+        ThreadID.create = function create(properties) {
+            return new ThreadID(properties);
+        };
+
+        /**
+         * Encodes the specified ThreadID message. Does not implicitly {@link proto.ThreadID.verify|verify} messages.
+         * @function encode
+         * @memberof proto.ThreadID
+         * @static
+         * @param {proto.IThreadID} message ThreadID message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        ThreadID.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.threadType != null && Object.hasOwnProperty.call(message, "threadType"))
+                writer.uint32(/* id 1, wireType 0 =*/8).int32(message.threadType);
+            if (message.threadKey != null && Object.hasOwnProperty.call(message, "threadKey"))
+                $root.proto.MessageKey.encode(message.threadKey, writer.uint32(/* id 2, wireType 2 =*/18).fork()).ldelim();
+            return writer;
+        };
+
+        /**
+         * Encodes the specified ThreadID message, length delimited. Does not implicitly {@link proto.ThreadID.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof proto.ThreadID
+         * @static
+         * @param {proto.IThreadID} message ThreadID message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        ThreadID.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+        };
+
+        /**
+         * Decodes a ThreadID message from the specified reader or buffer.
+         * @function decode
+         * @memberof proto.ThreadID
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {proto.ThreadID} ThreadID
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        ThreadID.decode = function decode(reader, length, error, long) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            if (long === undefined)
+                long = 0;
+            if (long > $Reader.recursionLimit)
+                throw Error("maximum nesting depth exceeded");
+            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.proto.ThreadID();
+            while (reader.pos < end) {
+                var tag = reader.uint32();
+                if (tag === error)
+                    break;
+                switch (tag >>> 3) {
+                case 1: {
+                        message.threadType = reader.int32();
+                        break;
+                    }
+                case 2: {
+                        message.threadKey = $root.proto.MessageKey.decode(reader, reader.uint32(), undefined, long + 1);
+                        break;
+                    }
+                default:
+                    reader.skipType(tag & 7, long);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes a ThreadID message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof proto.ThreadID
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {proto.ThreadID} ThreadID
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        ThreadID.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies a ThreadID message.
+         * @function verify
+         * @memberof proto.ThreadID
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        ThreadID.verify = function verify(message, long) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (long === undefined)
+                long = 0;
+            if (long > $util.recursionLimit)
+                return "maximum nesting depth exceeded";
+            if (message.threadType != null && message.hasOwnProperty("threadType"))
+                switch (message.threadType) {
+                default:
+                    return "threadType: enum value expected";
+                case 0:
+                case 1:
+                case 2:
+                    break;
+                }
+            if (message.threadKey != null && message.hasOwnProperty("threadKey")) {
+                var error = $root.proto.MessageKey.verify(message.threadKey, long + 1);
+                if (error)
+                    return "threadKey." + error;
+            }
+            return null;
+        };
+
+        /**
+         * Creates a ThreadID message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof proto.ThreadID
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {proto.ThreadID} ThreadID
+         */
+        ThreadID.fromObject = function fromObject(object, long) {
+            if (object instanceof $root.proto.ThreadID)
+                return object;
+            if (long === undefined)
+                long = 0;
+            if (long > $util.recursionLimit)
+                throw Error("maximum nesting depth exceeded");
+            var message = new $root.proto.ThreadID();
+            switch (object.threadType) {
+            default:
+                if (typeof object.threadType === "number") {
+                    message.threadType = object.threadType;
+                    break;
+                }
+                break;
+            case "UNKNOWN":
+            case 0:
+                message.threadType = 0;
+                break;
+            case "VIEW_REPLIES":
+            case 1:
+                message.threadType = 1;
+                break;
+            case "AI_THREAD":
+            case 2:
+                message.threadType = 2;
+                break;
+            }
+            if (object.threadKey != null) {
+                if (typeof object.threadKey !== "object")
+                    throw TypeError(".proto.ThreadID.threadKey: object expected");
+                message.threadKey = $root.proto.MessageKey.fromObject(object.threadKey, long + 1);
+            }
+            return message;
+        };
+
+        /**
+         * Creates a plain object from a ThreadID message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof proto.ThreadID
+         * @static
+         * @param {proto.ThreadID} message ThreadID
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        ThreadID.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            var object = {};
+            if (options.defaults) {
+                object.threadType = options.enums === String ? "UNKNOWN" : 0;
+                object.threadKey = null;
+            }
+            if (message.threadType != null && message.hasOwnProperty("threadType"))
+                object.threadType = options.enums === String ? $root.proto.ThreadID.ThreadType[message.threadType] === undefined ? message.threadType : $root.proto.ThreadID.ThreadType[message.threadType] : message.threadType;
+            if (message.threadKey != null && message.hasOwnProperty("threadKey"))
+                object.threadKey = $root.proto.MessageKey.toObject(message.threadKey, options);
+            return object;
+        };
+
+        /**
+         * Converts this ThreadID to JSON.
+         * @function toJSON
+         * @memberof proto.ThreadID
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        ThreadID.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        /**
+         * Gets the default type url for ThreadID
+         * @function getTypeUrl
+         * @memberof proto.ThreadID
+         * @static
+         * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns {string} The default type url
+         */
+        ThreadID.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+            if (typeUrlPrefix === undefined) {
+                typeUrlPrefix = "type.googleapis.com";
+            }
+            return typeUrlPrefix + "/proto.ThreadID";
+        };
+
+        /**
+         * ThreadType enum.
+         * @name proto.ThreadID.ThreadType
+         * @enum {number}
+         * @property {number} UNKNOWN=0 UNKNOWN value
+         * @property {number} VIEW_REPLIES=1 VIEW_REPLIES value
+         * @property {number} AI_THREAD=2 AI_THREAD value
+         */
+        ThreadID.ThreadType = (function() {
+            var valuesById = {}, values = Object.create(valuesById);
+            values[valuesById[0] = "UNKNOWN"] = 0;
+            values[valuesById[1] = "VIEW_REPLIES"] = 1;
+            values[valuesById[2] = "AI_THREAD"] = 2;
+            return values;
+        })();
+
+        return ThreadID;
+    })();
+
+    proto.AIThreadInfo = (function() {
+
+        /**
+         * Properties of a AIThreadInfo.
+         * @memberof proto
+         * @interface IAIThreadInfo
+         * @property {proto.AIThreadInfo.IAIThreadClientInfo|null} [clientInfo] AIThreadInfo clientInfo
+         */
+
+        /**
+         * Constructs a new AIThreadInfo.
+         * @memberof proto
+         * @classdesc Represents a AIThreadInfo.
+         * @implements IAIThreadInfo
+         * @constructor
+         * @param {proto.IAIThreadInfo=} [properties] Properties to set
+         */
+        function AIThreadInfo(properties) {
+            if (properties)
+                for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                    if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                        this[keys[i]] = properties[keys[i]];
+        }
+
+        /**
+         * AIThreadInfo clientInfo.
+         * @member {proto.AIThreadInfo.IAIThreadClientInfo|null|undefined} clientInfo
+         * @memberof proto.AIThreadInfo
+         * @instance
+         */
+        AIThreadInfo.prototype.clientInfo = null;
+
+        /**
+         * Creates a new AIThreadInfo instance using the specified properties.
+         * @function create
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {proto.IAIThreadInfo=} [properties] Properties to set
+         * @returns {proto.AIThreadInfo} AIThreadInfo instance
+         */
+        AIThreadInfo.create = function create(properties) {
+            return new AIThreadInfo(properties);
+        };
+
+        /**
+         * Encodes the specified AIThreadInfo message. Does not implicitly {@link proto.AIThreadInfo.verify|verify} messages.
+         * @function encode
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {proto.IAIThreadInfo} message AIThreadInfo message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        AIThreadInfo.encode = function encode(message, writer) {
+            if (!writer)
+                writer = $Writer.create();
+            if (message.clientInfo != null && Object.hasOwnProperty.call(message, "clientInfo"))
+                $root.proto.AIThreadInfo.AIThreadClientInfo.encode(message.clientInfo, writer.uint32(/* id 2, wireType 2 =*/18).fork()).ldelim();
+            return writer;
+        };
+
+        /**
+         * Encodes the specified AIThreadInfo message, length delimited. Does not implicitly {@link proto.AIThreadInfo.verify|verify} messages.
+         * @function encodeDelimited
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {proto.IAIThreadInfo} message AIThreadInfo message or plain object to encode
+         * @param {$protobuf.Writer} [writer] Writer to encode to
+         * @returns {$protobuf.Writer} Writer
+         */
+        AIThreadInfo.encodeDelimited = function encodeDelimited(message, writer) {
+            return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+        };
+
+        /**
+         * Decodes a AIThreadInfo message from the specified reader or buffer.
+         * @function decode
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @param {number} [length] Message length if known beforehand
+         * @returns {proto.AIThreadInfo} AIThreadInfo
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        AIThreadInfo.decode = function decode(reader, length, error, long) {
+            if (!(reader instanceof $Reader))
+                reader = $Reader.create(reader);
+            if (long === undefined)
+                long = 0;
+            if (long > $Reader.recursionLimit)
+                throw Error("maximum nesting depth exceeded");
+            var end = length === undefined ? reader.len : reader.pos + length, message = new $root.proto.AIThreadInfo();
+            while (reader.pos < end) {
+                var tag = reader.uint32();
+                if (tag === error)
+                    break;
+                switch (tag >>> 3) {
+                case 2: {
+                        message.clientInfo = $root.proto.AIThreadInfo.AIThreadClientInfo.decode(reader, reader.uint32(), undefined, long + 1);
+                        break;
+                    }
+                default:
+                    reader.skipType(tag & 7, long);
+                    break;
+                }
+            }
+            return message;
+        };
+
+        /**
+         * Decodes a AIThreadInfo message from the specified reader or buffer, length delimited.
+         * @function decodeDelimited
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+         * @returns {proto.AIThreadInfo} AIThreadInfo
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        AIThreadInfo.decodeDelimited = function decodeDelimited(reader) {
+            if (!(reader instanceof $Reader))
+                reader = new $Reader(reader);
+            return this.decode(reader, reader.uint32());
+        };
+
+        /**
+         * Verifies a AIThreadInfo message.
+         * @function verify
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {Object.<string,*>} message Plain object to verify
+         * @returns {string|null} `null` if valid, otherwise the reason why it is not
+         */
+        AIThreadInfo.verify = function verify(message, long) {
+            if (typeof message !== "object" || message === null)
+                return "object expected";
+            if (long === undefined)
+                long = 0;
+            if (long > $util.recursionLimit)
+                return "maximum nesting depth exceeded";
+            if (message.clientInfo != null && message.hasOwnProperty("clientInfo")) {
+                var error = $root.proto.AIThreadInfo.AIThreadClientInfo.verify(message.clientInfo, long + 1);
+                if (error)
+                    return "clientInfo." + error;
+            }
+            return null;
+        };
+
+        /**
+         * Creates a AIThreadInfo message from a plain object. Also converts values to their respective internal types.
+         * @function fromObject
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {Object.<string,*>} object Plain object
+         * @returns {proto.AIThreadInfo} AIThreadInfo
+         */
+        AIThreadInfo.fromObject = function fromObject(object, long) {
+            if (object instanceof $root.proto.AIThreadInfo)
+                return object;
+            if (long === undefined)
+                long = 0;
+            if (long > $util.recursionLimit)
+                throw Error("maximum nesting depth exceeded");
+            var message = new $root.proto.AIThreadInfo();
+            if (object.clientInfo != null) {
+                if (typeof object.clientInfo !== "object")
+                    throw TypeError(".proto.AIThreadInfo.clientInfo: object expected");
+                message.clientInfo = $root.proto.AIThreadInfo.AIThreadClientInfo.fromObject(object.clientInfo, long + 1);
+            }
+            return message;
+        };
+
+        /**
+         * Creates a plain object from a AIThreadInfo message. Also converts values to other types if specified.
+         * @function toObject
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {proto.AIThreadInfo} message AIThreadInfo
+         * @param {$protobuf.IConversionOptions} [options] Conversion options
+         * @returns {Object.<string,*>} Plain object
+         */
+        AIThreadInfo.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            var object = {};
+            if (options.defaults)
+                object.clientInfo = null;
+            if (message.clientInfo != null && message.hasOwnProperty("clientInfo"))
+                object.clientInfo = $root.proto.AIThreadInfo.AIThreadClientInfo.toObject(message.clientInfo, options);
+            return object;
+        };
+
+        /**
+         * Converts this AIThreadInfo to JSON.
+         * @function toJSON
+         * @memberof proto.AIThreadInfo
+         * @instance
+         * @returns {Object.<string,*>} JSON object
+         */
+        AIThreadInfo.prototype.toJSON = function toJSON() {
+            return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+        };
+
+        /**
+         * Gets the default type url for AIThreadInfo
+         * @function getTypeUrl
+         * @memberof proto.AIThreadInfo
+         * @static
+         * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns {string} The default type url
+         */
+        AIThreadInfo.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+            if (typeUrlPrefix === undefined) {
+                typeUrlPrefix = "type.googleapis.com";
+            }
+            return typeUrlPrefix + "/proto.AIThreadInfo";
+        };
+
+        AIThreadInfo.AIThreadClientInfo = (function() {
+
+            /**
+             * Properties of a AIThreadClientInfo.
+             * @memberof proto.AIThreadInfo
+             * @interface IAIThreadClientInfo
+             * @property {proto.AIThreadInfo.AIThreadClientInfo.AIThreadType|null} [type] AIThreadClientInfo type
+             */
+
+            /**
+             * Constructs a new AIThreadClientInfo.
+             * @memberof proto.AIThreadInfo
+             * @classdesc Represents a AIThreadClientInfo.
+             * @implements IAIThreadClientInfo
+             * @constructor
+             * @param {proto.AIThreadInfo.IAIThreadClientInfo=} [properties] Properties to set
+             */
+            function AIThreadClientInfo(properties) {
+                if (properties)
+                    for (var keys = Object.keys(properties), i = 0; i < keys.length; ++i)
+                        if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                            this[keys[i]] = properties[keys[i]];
+            }
+
+            /**
+             * AIThreadClientInfo type.
+             * @member {proto.AIThreadInfo.AIThreadClientInfo.AIThreadType} type
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @instance
+             */
+            AIThreadClientInfo.prototype.type = 0;
+
+            /**
+             * Creates a new AIThreadClientInfo instance using the specified properties.
+             * @function create
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {proto.AIThreadInfo.IAIThreadClientInfo=} [properties] Properties to set
+             * @returns {proto.AIThreadInfo.AIThreadClientInfo} AIThreadClientInfo instance
+             */
+            AIThreadClientInfo.create = function create(properties) {
+                return new AIThreadClientInfo(properties);
+            };
+
+            /**
+             * Encodes the specified AIThreadClientInfo message. Does not implicitly {@link proto.AIThreadInfo.AIThreadClientInfo.verify|verify} messages.
+             * @function encode
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {proto.AIThreadInfo.IAIThreadClientInfo} message AIThreadClientInfo message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            AIThreadClientInfo.encode = function encode(message, writer) {
+                if (!writer)
+                    writer = $Writer.create();
+                if (message.type != null && Object.hasOwnProperty.call(message, "type"))
+                    writer.uint32(/* id 1, wireType 0 =*/8).int32(message.type);
+                return writer;
+            };
+
+            /**
+             * Encodes the specified AIThreadClientInfo message, length delimited. Does not implicitly {@link proto.AIThreadInfo.AIThreadClientInfo.verify|verify} messages.
+             * @function encodeDelimited
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {proto.AIThreadInfo.IAIThreadClientInfo} message AIThreadClientInfo message or plain object to encode
+             * @param {$protobuf.Writer} [writer] Writer to encode to
+             * @returns {$protobuf.Writer} Writer
+             */
+            AIThreadClientInfo.encodeDelimited = function encodeDelimited(message, writer) {
+                return this.encode(message, writer && writer.len ? writer.fork() : writer).ldelim();
+            };
+
+            /**
+             * Decodes a AIThreadClientInfo message from the specified reader or buffer.
+             * @function decode
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @param {number} [length] Message length if known beforehand
+             * @returns {proto.AIThreadInfo.AIThreadClientInfo} AIThreadClientInfo
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            AIThreadClientInfo.decode = function decode(reader, length, error, long) {
+                if (!(reader instanceof $Reader))
+                    reader = $Reader.create(reader);
+                if (long === undefined)
+                    long = 0;
+                if (long > $Reader.recursionLimit)
+                    throw Error("maximum nesting depth exceeded");
+                var end = length === undefined ? reader.len : reader.pos + length, message = new $root.proto.AIThreadInfo.AIThreadClientInfo();
+                while (reader.pos < end) {
+                    var tag = reader.uint32();
+                    if (tag === error)
+                        break;
+                    switch (tag >>> 3) {
+                    case 1: {
+                            message.type = reader.int32();
+                            break;
+                        }
+                    default:
+                        reader.skipType(tag & 7, long);
+                        break;
+                    }
+                }
+                return message;
+            };
+
+            /**
+             * Decodes a AIThreadClientInfo message from the specified reader or buffer, length delimited.
+             * @function decodeDelimited
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+             * @returns {proto.AIThreadInfo.AIThreadClientInfo} AIThreadClientInfo
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            AIThreadClientInfo.decodeDelimited = function decodeDelimited(reader) {
+                if (!(reader instanceof $Reader))
+                    reader = new $Reader(reader);
+                return this.decode(reader, reader.uint32());
+            };
+
+            /**
+             * Verifies a AIThreadClientInfo message.
+             * @function verify
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {Object.<string,*>} message Plain object to verify
+             * @returns {string|null} `null` if valid, otherwise the reason why it is not
+             */
+            AIThreadClientInfo.verify = function verify(message, long) {
+                if (typeof message !== "object" || message === null)
+                    return "object expected";
+                if (long === undefined)
+                    long = 0;
+                if (long > $util.recursionLimit)
+                    return "maximum nesting depth exceeded";
+                if (message.type != null && message.hasOwnProperty("type"))
+                    switch (message.type) {
+                    default:
+                        return "type: enum value expected";
+                    case 0:
+                    case 1:
+                    case 2:
+                    case 3:
+                        break;
+                    }
+                return null;
+            };
+
+            /**
+             * Creates a AIThreadClientInfo message from a plain object. Also converts values to their respective internal types.
+             * @function fromObject
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {Object.<string,*>} object Plain object
+             * @returns {proto.AIThreadInfo.AIThreadClientInfo} AIThreadClientInfo
+             */
+            AIThreadClientInfo.fromObject = function fromObject(object, long) {
+                if (object instanceof $root.proto.AIThreadInfo.AIThreadClientInfo)
+                    return object;
+                if (long === undefined)
+                    long = 0;
+                if (long > $util.recursionLimit)
+                    throw Error("maximum nesting depth exceeded");
+                var message = new $root.proto.AIThreadInfo.AIThreadClientInfo();
+                switch (object.type) {
+                default:
+                    if (typeof object.type === "number") {
+                        message.type = object.type;
+                        break;
+                    }
+                    break;
+                case "UNKNOWN":
+                case 0:
+                    message.type = 0;
+                    break;
+                case "DEFAULT":
+                case 1:
+                    message.type = 1;
+                    break;
+                case "INCOGNITO":
+                case 2:
+                    message.type = 2;
+                    break;
+                case "SIDE_CHAT":
+                case 3:
+                    message.type = 3;
+                    break;
+                }
+                return message;
+            };
+
+            /**
+             * Creates a plain object from a AIThreadClientInfo message. Also converts values to other types if specified.
+             * @function toObject
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {proto.AIThreadInfo.AIThreadClientInfo} message AIThreadClientInfo
+             * @param {$protobuf.IConversionOptions} [options] Conversion options
+             * @returns {Object.<string,*>} Plain object
+             */
+            AIThreadClientInfo.toObject = function toObject(message, options) {
+                if (!options)
+                    options = {};
+                var object = {};
+                if (options.defaults)
+                    object.type = options.enums === String ? "UNKNOWN" : 0;
+                if (message.type != null && message.hasOwnProperty("type"))
+                    object.type = options.enums === String ? $root.proto.AIThreadInfo.AIThreadClientInfo.AIThreadType[message.type] === undefined ? message.type : $root.proto.AIThreadInfo.AIThreadClientInfo.AIThreadType[message.type] : message.type;
+                return object;
+            };
+
+            /**
+             * Converts this AIThreadClientInfo to JSON.
+             * @function toJSON
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @instance
+             * @returns {Object.<string,*>} JSON object
+             */
+            AIThreadClientInfo.prototype.toJSON = function toJSON() {
+                return this.constructor.toObject(this, $protobuf.util.toJSONOptions);
+            };
+
+            /**
+             * Gets the default type url for AIThreadClientInfo
+             * @function getTypeUrl
+             * @memberof proto.AIThreadInfo.AIThreadClientInfo
+             * @static
+             * @param {string} [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+             * @returns {string} The default type url
+             */
+            AIThreadClientInfo.getTypeUrl = function getTypeUrl(typeUrlPrefix) {
+                if (typeUrlPrefix === undefined) {
+                    typeUrlPrefix = "type.googleapis.com";
+                }
+                return typeUrlPrefix + "/proto.AIThreadInfo.AIThreadClientInfo";
+            };
+
+            /**
+             * AIThreadType enum.
+             * @name proto.AIThreadInfo.AIThreadClientInfo.AIThreadType
+             * @enum {number}
+             * @property {number} UNKNOWN=0 UNKNOWN value
+             * @property {number} DEFAULT=1 DEFAULT value
+             * @property {number} INCOGNITO=2 INCOGNITO value
+             * @property {number} SIDE_CHAT=3 SIDE_CHAT value
+             */
+            AIThreadClientInfo.AIThreadType = (function() {
+                var valuesById = {}, values = Object.create(valuesById);
+                values[valuesById[0] = "UNKNOWN"] = 0;
+                values[valuesById[1] = "DEFAULT"] = 1;
+                values[valuesById[2] = "INCOGNITO"] = 2;
+                values[valuesById[3] = "SIDE_CHAT"] = 3;
+                return values;
+            })();
+
+            return AIThreadClientInfo;
+        })();
+
+        return AIThreadInfo;
     })();
 
     return proto;

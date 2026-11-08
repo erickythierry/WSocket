@@ -97,7 +97,7 @@ export declare const makeBusinessSocket: (config: SocketConfig) => {
     sendMessageAck: (node: BinaryNode, errorCode?: number) => Promise<void>;
     sendRetryRequest: (node: BinaryNode, forceIncludeKeys?: boolean, retryReason?: string) => Promise<void>;
     rejectCall: (callId: string, callFrom: string) => Promise<void>;
-    fetchMessageHistory: (count: number, oldestMsgKey: import("../Types").WAMessageKey, oldestMsgTimestamp: number | import("long").default) => Promise<string>;
+    fetchMessageHistory: (count: number, oldestMsgKey: import("../Types").WAMessageKey, oldestMsgTimestamp: number | Long) => Promise<string>;
     requestPlaceholderResend: (messageKey: import("../Types").WAMessageKey) => Promise<string | undefined>;
     getPrivacyTokens: (jids: string[], timestamp?: number) => Promise<BinaryNode>;
     reissueTcTokenAfterIdentityChange: (jid: string) => Promise<void>;
@@ -127,6 +127,18 @@ export declare const makeBusinessSocket: (config: SocketConfig) => {
     }>;
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<import("../WABinary").JidWithDevice[]>;
     userDevicesCache: import("../Types").CacheStore;
+    getMetaAiPromptSecret: (messageId: string) => Uint8Array<ArrayBufferLike> | undefined;
+    sendMetaAiPrompt: (text: string, { aiThreadId }?: {
+        aiThreadId?: string;
+    }) => Promise<{
+        key: {
+            remoteJid: string;
+            fromMe: boolean;
+            id: string;
+        };
+        aiThreadId: string;
+    }>;
+    resetMetaAiSession: () => Promise<void>;
     getSelectiveRelayContext: (groupJid: string, messageId: string) => {
         groupJid: string;
         allowedUsers: string[];

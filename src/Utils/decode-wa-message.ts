@@ -98,7 +98,7 @@ export function decodeMessageNode(stanza: BinaryNode, meId: string, meLid: strin
 	const peer_recipient_lid :string | undefined = stanza?.attrs?.peer_recipient_lid
 	const fromMe = (isLidUser(from) || isLidUser(participant) ? isMeLid : isMe)(stanza.attrs.participant || stanza.attrs.from);
 
-		if (isJidUser(from) || isLidUser(from)) {
+		if (isJidUser(from) || isLidUser(from) || isJidMetaIa(from)) {
 		if (recipient && !isJidMetaIa(recipient)) {
 			if (!isMe(from) && !isMeLid(from)) {
 			throw new Boom('recipient present, but msg not from me', { data: stanza });
