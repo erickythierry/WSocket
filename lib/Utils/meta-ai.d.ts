@@ -14,9 +14,10 @@ export declare const decryptBotChunk: (input: {
     encPayload: Uint8Array;
 }) => Buffer<ArrayBuffer>;
 /** metadados e thread que a Meta AI exige no prompt direto para `@bot` */
-export declare const buildMetaAiPrompt: (message: proto.IMessage, { aiThreadId, messageSecret }: {
+export declare const buildMetaAiPrompt: (message: proto.IMessage, { aiThreadId, messageSecret, jid }: {
     aiThreadId?: string;
     messageSecret: Uint8Array;
+    jid?: string;
 }) => {
     message: proto.IMessage;
     aiThreadId: string;

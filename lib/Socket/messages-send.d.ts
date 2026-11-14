@@ -33,9 +33,13 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<JidWithDevice[]>;
     userDevicesCache: CacheStore;
     getMetaAiPromptSecret: (messageId: string) => Uint8Array<ArrayBufferLike> | undefined;
-    /** manda um prompt para a Meta AI; a resposta chega pelo evento `messages.bot-chunk` com `targetMessageId` = `key.id` */
-    sendMetaAiPrompt: (text: string, { aiThreadId }?: {
+    /**
+     * manda um prompt para a Meta AI; a resposta chega pelo evento `messages.bot-chunk` com `targetMessageId` = `key.id`.
+     * `jid`: cada conversa nova criada no app tem o próprio `<id>@bot`; o padrão é o chat principal
+     */
+    sendMetaAiPrompt: (text: string, { aiThreadId, jid }?: {
         aiThreadId?: string;
+        jid?: string;
     }) => Promise<{
         key: {
             remoteJid: string;
@@ -45,7 +49,7 @@ export declare const makeMessagesSocket: (config: SocketConfig) => {
         aiThreadId: string;
     }>;
     /** a Meta AI perde a sessão Signal depois de horas: o prompt tem ack e nenhum chunk volta. Apagar força uma nova */
-    resetMetaAiSession: () => Promise<void>;
+    resetMetaAiSession: (jid?: string) => Promise<void>;
     getSelectiveRelayContext: (groupJid: string, messageId: string) => {
         groupJid: string;
         allowedUsers: string[];

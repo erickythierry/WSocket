@@ -48,7 +48,11 @@ export const decryptBotChunk = (input: {
 /** metadados e thread que a Meta AI exige no prompt direto para `@bot` */
 export const buildMetaAiPrompt = (
 	message: proto.IMessage,
-	{ aiThreadId = randomUUID(), messageSecret }: { aiThreadId?: string; messageSecret: Uint8Array }
+	{
+		aiThreadId = randomUUID(),
+		messageSecret,
+		jid = META_AI_BOT_JID
+	}: { aiThreadId?: string; messageSecret: Uint8Array; jid?: string }
 ): { message: proto.IMessage; aiThreadId: string } => ({
 	aiThreadId,
 	message: {
@@ -57,7 +61,7 @@ export const buildMetaAiPrompt = (
 			...message.messageContextInfo,
 			messageSecret,
 			threadId: [
-				{ threadType: AI_THREAD, threadKey: { remoteJid: META_AI_BOT_JID, fromMe: true, id: aiThreadId } }
+				{ threadType: AI_THREAD, threadKey: { remoteJid: jid, fromMe: true, id: aiThreadId } }
 			],
 			botMetadata: {
 				...message.messageContextInfo?.botMetadata,

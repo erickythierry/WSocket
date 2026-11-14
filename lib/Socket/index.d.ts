@@ -127,8 +127,9 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<import("..").JidWithDevice[]>;
     userDevicesCache: import("../Types").CacheStore;
     getMetaAiPromptSecret: (messageId: string) => Uint8Array<ArrayBufferLike> | undefined;
-    sendMetaAiPrompt: (text: string, { aiThreadId }?: {
+    sendMetaAiPrompt: (text: string, { aiThreadId, jid }?: {
         aiThreadId?: string;
+        jid?: string;
     }) => Promise<{
         key: {
             remoteJid: string;
@@ -137,7 +138,7 @@ declare const makeWASocket: (config: UserFacingSocketConfig) => {
         };
         aiThreadId: string;
     }>;
-    resetMetaAiSession: () => Promise<void>;
+    resetMetaAiSession: (jid?: string) => Promise<void>;
     getSelectiveRelayContext: (groupJid: string, messageId: string) => {
         groupJid: string;
         allowedUsers: string[];

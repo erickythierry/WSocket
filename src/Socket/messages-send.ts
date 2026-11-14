@@ -1160,21 +1160,27 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		getUSyncDevices,
 		userDevicesCache,
 		getMetaAiPromptSecret: (messageId: string) => metaAiSecrets.get(messageId),
-		/** manda um prompt para a Meta AI; a resposta chega pelo evento `messages.bot-chunk` com `targetMessageId` = `key.id` */
-		sendMetaAiPrompt: async (text: string, { aiThreadId }: { aiThreadId?: string } = {}) => {
+		/**
+		 * manda um prompt para a Meta AI; a resposta chega pelo evento `messages.bot-chunk` com `targetMessageId` = `key.id`.
+		 * `jid`: cada conversa nova criada no app tem o próprio `<id>@bot`; o padrão é o chat principal
+		 */
+		sendMetaAiPrompt: async (
+			text: string,
+			{ aiThreadId, jid = META_AI_BOT_JID }: { aiThreadId?: string; jid?: string } = {}
+		) => {
 			const messageSecret = randomBytes(32)
-			const prompt = buildMetaAiPrompt({ conversation: text }, { aiThreadId, messageSecret })
+			const prompt = buildMetaAiPrompt({ conversation: text }, { aiThreadId, messageSecret, jid })
 			const messageId = generateMessageIDV2(sock.user?.id)
 			// antes do relay: o primeiro chunk pode chegar antes do relayMessage resolver
 			metaAiSecrets.set(messageId, messageSecret)
-			await relayMessage(META_AI_BOT_JID, prompt.message, { messageId })
+			await relayMessage(jid, prompt.message, { messageId })
 
-			return { key: { remoteJid: META_AI_BOT_JID, fromMe: true, id: messageId }, aiThreadId: prompt.aiThreadId }
+			return { key: { remoteJid: jid, fromMe: true, id: messageId }, aiThreadId: prompt.aiThreadId }
 		},
 		/** a Meta AI perde a sessão Signal depois de horas: o prompt tem ack e nenhum chunk volta. Apagar força uma nova */
-		resetMetaAiSession: async () => {
-			const devices = await getUSyncDevices([META_AI_BOT_JID], false, false)
-			const addrs = [META_AI_BOT_JID, ...devices.map(d => jidEncode(d.user, 'bot', d.device))].map(jid =>
+		resetMetaAiSession: async (jid = META_AI_BOT_JID) => {
+			const devices = await getUSyncDevices([jid], false, false)
+			const addrs = [jid, ...devices.map(d => jidEncode(d.user, 'bot', d.device))].map(jid =>
 				signalRepository.jidToSignalProtocolAddress(jid)
 			)
 			await authState.keys.set({ session: Object.fromEntries(addrs.map(addr => [addr, null])) })

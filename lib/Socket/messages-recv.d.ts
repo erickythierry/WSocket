@@ -38,8 +38,9 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<import("../WABinary").JidWithDevice[]>;
     userDevicesCache: CacheStore;
     getMetaAiPromptSecret: (messageId: string) => Uint8Array<ArrayBufferLike> | undefined;
-    sendMetaAiPrompt: (text: string, { aiThreadId }?: {
+    sendMetaAiPrompt: (text: string, { aiThreadId, jid }?: {
         aiThreadId?: string;
+        jid?: string;
     }) => Promise<{
         key: {
             remoteJid: string;
@@ -48,7 +49,7 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
         };
         aiThreadId: string;
     }>;
-    resetMetaAiSession: () => Promise<void>;
+    resetMetaAiSession: (jid?: string) => Promise<void>;
     getSelectiveRelayContext: (groupJid: string, messageId: string) => {
         groupJid: string;
         allowedUsers: string[];
