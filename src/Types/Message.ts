@@ -298,6 +298,8 @@ export type MessageRelayOptions = MinimalRelayOptions & {
 	 * Não altera o roteamento nem a criptografia.
 	 */
 	decryptFailHide?: boolean
+	/** grupo: descarta a memória de quem já tem a sender key, dentro da transação do envio (redistribui o SKDM a todos) */
+	resetSenderKeyMemory?: boolean
 }
 
 export type MiscMessageGenerationOptions = MinimalRelayOptions & {

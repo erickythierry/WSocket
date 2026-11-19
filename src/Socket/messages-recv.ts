@@ -68,6 +68,7 @@ import {
 import { extractGroupMetadata } from './groups'
 import { BoundedTtlMap } from '../Utils/bounded-ttl-map'
 import { decryptBotChunk, parseBotChunkNode } from '../Utils/meta-ai'
+import { makeStaleAddressingGuard, podeReenviarAposStaleAddressing } from '../Utils/stale-addressing'
 import caches from '../Utils/cache-utils'
 import { makeMessagesSocket } from './messages-send'
 
@@ -108,6 +109,45 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		cancelTcTokenPrune,
 		userDevicesCache
 	} = sock
+
+	const podeRecuperarStaleAddressing = makeStaleAddressingGuard({
+		janelaMs: 10 * 60_000,
+		rajadaMs: 30_000,
+		maxPorCiclo: 5,
+		maxGrupos: 10
+	})
+
+	/**
+	 * Ack 421: o grupo recusa todo envio até a lista de destinatários e a sender key serem refeitas. O reenvio
+	 * zera a memória de SKDM dentro da transação do envio (um envio concorrente não regrava o map antigo por cima)
+	 * e usa metadata e devices novos; o groups.update faz quem guarda metadata do grupo descartar a cópia velha.
+	 * Envio seletivo não é reenviado: sem o filtro original iria para o grupo inteiro.
+	 */
+	const recoverStaleAddressing = async (jid: string, id: string) => {
+		const msg = getSelectiveRelayContext(jid, id) ? undefined : await getMessage({ remoteJid: jid, fromMe: true, id })
+		if (!podeReenviarAposStaleAddressing(msg)) {
+			logger.warn({ jid, id }, 'ack 421: mensagem fora do cache, seletiva ou com atributos próprios; sem reenvio')
+			return
+		}
+
+		const ciclo = podeRecuperarStaleAddressing(jid)
+		if (!ciclo) {
+			logger.warn({ jid, id }, 'ack 421 repetido no grupo dentro da janela; sem nova recuperação')
+			return
+		}
+
+		if (ciclo === 'novo') {
+			ev.emit('groups.update', [{ id: jid }])
+		}
+
+		await relayMessage(jid, msg!, {
+			messageId: id,
+			useCachedGroupMetadata: ciclo === 'rajada',
+			useUserDevicesCache: false,
+			resetSenderKeyMemory: true
+		})
+		logger.warn({ jid, id, ciclo }, 'ack 421: mensagem reenviada')
+	}
 
 	/** lista de devices mudou: invalida o cache do dono e apaga a sessão dos devices removidos */
 	const handleDevicesNotification = async (node: BinaryNode, child: BinaryNode, devices: BinaryNode[]) => {
@@ -1371,6 +1411,13 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 			} else {
 				logger.warn({ attrs }, 'received error in ack')
 			}
+
+			if (attrs.error === SERVER_ERROR_CODES.StaleGroupAddressingMode && isJidGroup(attrs.from)) {
+				recoverStaleAddressing(attrs.from, attrs.id).catch(err =>
+					logger.warn({ err: err?.message, jid: attrs.from, id: attrs.id }, 'falha ao recuperar ack 421')
+				)
+			}
+
 			ev.emit('messages.update', [
 				{
 					key,

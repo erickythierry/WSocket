@@ -9,7 +9,9 @@ export const UNAUTHORIZED_CODES = [401, 403, 419]
 
 export const SERVER_ERROR_CODES = {
 	/** server rejected stanza because no tctoken was attached for this contact */
-	MissingTcToken: '463'
+	MissingTcToken: '463',
+	/** grupo recusou a mensagem pelo modo de endereçamento (pn/lid); nome do NackReason do WA Web */
+	StaleGroupAddressingMode: '421'
 } as const
 
 export const DEFAULT_ORIGIN = 'https://web.whatsapp.com'

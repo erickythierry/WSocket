@@ -563,7 +563,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			newsletterMediaId,
 			isretry,
 			includeJids,
-			decryptFailHide
+			decryptFailHide,
+			resetSenderKeyMemory
 		}: MessageRelayOptions
 	) => {
 		if (!authState.creds.me?.id) {
@@ -701,12 +702,15 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				if (isGroup || isStatus) {
 					// cópia: o objeto do cache não pode ficar marcado se o envio falhar no meio
 					const senderKeyMap: { [jid: string]: boolean } = {}
+					let senderKeyMapChanged = false
 					if (!participant && !isStatus) {
 						const result = await authState.keys.get('sender-key-memory', [jid])
-						Object.assign(senderKeyMap, result[jid])
+						if (resetSenderKeyMemory) {
+							senderKeyMapChanged = !!result[jid] && Object.keys(result[jid]).length > 0
+						} else {
+							Object.assign(senderKeyMap, result[jid])
+						}
 					}
-
-					let senderKeyMapChanged = false
 
 					if (!participant) {
 						if (!isStatus) {

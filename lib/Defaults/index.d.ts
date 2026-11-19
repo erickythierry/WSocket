@@ -4,6 +4,8 @@ export declare const UNAUTHORIZED_CODES: number[];
 export declare const SERVER_ERROR_CODES: {
     /** server rejected stanza because no tctoken was attached for this contact */
     readonly MissingTcToken: "463";
+    /** grupo recusou a mensagem pelo modo de endereçamento (pn/lid); nome do NackReason do WA Web */
+    readonly StaleGroupAddressingMode: "421";
 };
 export declare const DEFAULT_ORIGIN = "https://web.whatsapp.com";
 export declare const DEF_CALLBACK_PREFIX = "CB:";
