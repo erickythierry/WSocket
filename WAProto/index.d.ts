@@ -18486,6 +18486,9 @@ export namespace proto {
         /** Message spoilerMessage */
         spoilerMessage?: (proto.Message.IFutureProofMessage|null);
 
+        /** Message stickerWithAudioMessage */
+        stickerWithAudioMessage?: (proto.Message.IFutureProofMessage|null);
+
         /** Message invoiceMessage */
         invoiceMessage?: (proto.Message.IInvoiceMessage|null);
 
@@ -18765,6 +18768,9 @@ export namespace proto {
 
         /** Message spoilerMessage. */
         public spoilerMessage?: (proto.Message.IFutureProofMessage|null);
+
+        /** Message stickerWithAudioMessage. */
+        public stickerWithAudioMessage?: (proto.Message.IFutureProofMessage|null);
 
         /** Message invoiceMessage. */
         public invoiceMessage?: (proto.Message.IInvoiceMessage|null);
@@ -34107,6 +34113,9 @@ export namespace proto {
 
             /** StickerMessage accessibilityLabel */
             accessibilityLabel?: (string|null);
+
+            /** StickerMessage audio */
+            audio?: (proto.Message.IAudioMessage|null);
         }
 
         /** Represents a StickerMessage. */
@@ -34177,6 +34186,9 @@ export namespace proto {
 
             /** StickerMessage accessibilityLabel. */
             public accessibilityLabel: string;
+
+            /** StickerMessage audio. */
+            public audio?: (proto.Message.IAudioMessage|null);
 
             /**
              * Creates a new StickerMessage instance using the specified properties.

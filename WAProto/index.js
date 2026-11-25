@@ -52509,6 +52509,7 @@ $root.proto = (function() {
          * @property {proto.Message.IListResponseMessage|null} [listResponseMessage] Message listResponseMessage
          * @property {proto.Message.IFutureProofMessage|null} [ephemeralMessage] Message ephemeralMessage
          * @property {proto.Message.IFutureProofMessage|null} [spoilerMessage] Message spoilerMessage
+         * @property {proto.Message.IFutureProofMessage|null} [stickerWithAudioMessage] Message stickerWithAudioMessage
          * @property {proto.Message.IInvoiceMessage|null} [invoiceMessage] Message invoiceMessage
          * @property {proto.Message.IButtonsMessage|null} [buttonsMessage] Message buttonsMessage
          * @property {proto.Message.IButtonsResponseMessage|null} [buttonsResponseMessage] Message buttonsResponseMessage
@@ -52846,6 +52847,14 @@ $root.proto = (function() {
          * @instance
          */
         Message.prototype.spoilerMessage = null;
+
+        /**
+         * Message stickerWithAudioMessage.
+         * @member {proto.Message.IFutureProofMessage|null|undefined} stickerWithAudioMessage
+         * @memberof proto.Message
+         * @instance
+         */
+        Message.prototype.stickerWithAudioMessage = null;
 
         /**
          * Message invoiceMessage.
@@ -53507,6 +53516,8 @@ $root.proto = (function() {
                 $root.proto.QuestionResponseMessage.encode(message.questionResponseMessage, writer.uint32(/* id 107, wireType 2 =*/858).fork()).ldelim();
             if (message.spoilerMessage != null && Object.hasOwnProperty.call(message, "spoilerMessage"))
                 $root.proto.Message.FutureProofMessage.encode(message.spoilerMessage, writer.uint32(/* id 118, wireType 2 =*/946).fork()).ldelim();
+            if (message.stickerWithAudioMessage != null && Object.hasOwnProperty.call(message, "stickerWithAudioMessage"))
+                $root.proto.Message.FutureProofMessage.encode(message.stickerWithAudioMessage, writer.uint32(/* id 134, wireType 2 =*/1074).fork()).ldelim();
             return writer;
         };
 
@@ -53677,6 +53688,10 @@ $root.proto = (function() {
                     }
                 case 118: {
                         message.spoilerMessage = $root.proto.Message.FutureProofMessage.decode(reader, reader.uint32(), undefined, long + 1);
+                        break;
+                    }
+                case 134: {
+                        message.stickerWithAudioMessage = $root.proto.Message.FutureProofMessage.decode(reader, reader.uint32(), undefined, long + 1);
                         break;
                     }
                 case 41: {
@@ -54108,6 +54123,11 @@ $root.proto = (function() {
                 var error = $root.proto.Message.FutureProofMessage.verify(message.spoilerMessage, long + 1);
                 if (error)
                     return "spoilerMessage." + error;
+            }
+            if (message.stickerWithAudioMessage != null && message.hasOwnProperty("stickerWithAudioMessage")) {
+                var error = $root.proto.Message.FutureProofMessage.verify(message.stickerWithAudioMessage, long + 1);
+                if (error)
+                    return "stickerWithAudioMessage." + error;
             }
             if (message.invoiceMessage != null && message.hasOwnProperty("invoiceMessage")) {
                 var error = $root.proto.Message.InvoiceMessage.verify(message.invoiceMessage, long + 1);
@@ -54575,6 +54595,11 @@ $root.proto = (function() {
                     throw TypeError(".proto.Message.spoilerMessage: object expected");
                 message.spoilerMessage = $root.proto.Message.FutureProofMessage.fromObject(object.spoilerMessage, long + 1);
             }
+            if (object.stickerWithAudioMessage != null) {
+                if (typeof object.stickerWithAudioMessage !== "object")
+                    throw TypeError(".proto.Message.stickerWithAudioMessage: object expected");
+                message.stickerWithAudioMessage = $root.proto.Message.FutureProofMessage.fromObject(object.stickerWithAudioMessage, long + 1);
+            }
             if (object.invoiceMessage != null) {
                 if (typeof object.invoiceMessage !== "object")
                     throw TypeError(".proto.Message.invoiceMessage: object expected");
@@ -54967,6 +54992,7 @@ $root.proto = (function() {
                 object.botForwardedMessage = null;
                 object.questionResponseMessage = null;
                 object.spoilerMessage = null;
+                object.stickerWithAudioMessage = null;
             }
             if (message.conversation != null && message.hasOwnProperty("conversation"))
                 object.conversation = message.conversation;
@@ -55148,6 +55174,8 @@ $root.proto = (function() {
                 object.questionResponseMessage = $root.proto.QuestionResponseMessage.toObject(message.questionResponseMessage, options);
             if (message.spoilerMessage != null && message.hasOwnProperty("spoilerMessage"))
                 object.spoilerMessage = $root.proto.Message.FutureProofMessage.toObject(message.spoilerMessage, options);
+            if (message.stickerWithAudioMessage != null && message.hasOwnProperty("stickerWithAudioMessage"))
+                object.stickerWithAudioMessage = $root.proto.Message.FutureProofMessage.toObject(message.stickerWithAudioMessage, options);
             return object;
         };
 
@@ -96937,6 +96965,7 @@ $root.proto = (function() {
              * @property {boolean|null} [isAiSticker] StickerMessage isAiSticker
              * @property {boolean|null} [isLottie] StickerMessage isLottie
              * @property {string|null} [accessibilityLabel] StickerMessage accessibilityLabel
+             * @property {proto.Message.IAudioMessage|null} [audio] StickerMessage audio
              */
 
             /**
@@ -97115,6 +97144,14 @@ $root.proto = (function() {
             StickerMessage.prototype.accessibilityLabel = "";
 
             /**
+             * StickerMessage audio.
+             * @member {proto.Message.IAudioMessage|null|undefined} audio
+             * @memberof proto.Message.StickerMessage
+             * @instance
+             */
+            StickerMessage.prototype.audio = null;
+
+            /**
              * Creates a new StickerMessage instance using the specified properties.
              * @function create
              * @memberof proto.Message.StickerMessage
@@ -97178,6 +97215,8 @@ $root.proto = (function() {
                     writer.uint32(/* id 21, wireType 0 =*/168).bool(message.isLottie);
                 if (message.accessibilityLabel != null && Object.hasOwnProperty.call(message, "accessibilityLabel"))
                     writer.uint32(/* id 22, wireType 2 =*/178).string(message.accessibilityLabel);
+                if (message.audio != null && Object.hasOwnProperty.call(message, "audio"))
+                    $root.proto.Message.AudioMessage.encode(message.audio, writer.uint32(/* id 26, wireType 2 =*/210).fork()).ldelim();
                 return writer;
             };
 
@@ -97298,6 +97337,10 @@ $root.proto = (function() {
                             message.accessibilityLabel = reader.string();
                             break;
                         }
+                    case 26: {
+                            message.audio = $root.proto.Message.AudioMessage.decode(reader, reader.uint32(), undefined, long + 1);
+                            break;
+                        }
                     default:
                         reader.skipType(tag & 7, long);
                         break;
@@ -97399,6 +97442,11 @@ $root.proto = (function() {
                 if (message.accessibilityLabel != null && message.hasOwnProperty("accessibilityLabel"))
                     if (!$util.isString(message.accessibilityLabel))
                         return "accessibilityLabel: string expected";
+                if (message.audio != null && message.hasOwnProperty("audio")) {
+                    var error = $root.proto.Message.AudioMessage.verify(message.audio, long + 1);
+                    if (error)
+                        return "audio." + error;
+                }
                 return null;
             };
 
@@ -97497,6 +97545,11 @@ $root.proto = (function() {
                     message.isLottie = Boolean(object.isLottie);
                 if (object.accessibilityLabel != null)
                     message.accessibilityLabel = String(object.accessibilityLabel);
+                if (object.audio != null) {
+                    if (typeof object.audio !== "object")
+                        throw TypeError(".proto.Message.StickerMessage.audio: object expected");
+                    message.audio = $root.proto.Message.AudioMessage.fromObject(object.audio, long + 1);
+                }
                 return message;
             };
 
@@ -97576,6 +97629,7 @@ $root.proto = (function() {
                     object.isAiSticker = false;
                     object.isLottie = false;
                     object.accessibilityLabel = "";
+                    object.audio = null;
                 }
                 if (message.url != null && message.hasOwnProperty("url"))
                     object.url = message.url;
@@ -97632,6 +97686,8 @@ $root.proto = (function() {
                     object.isLottie = message.isLottie;
                 if (message.accessibilityLabel != null && message.hasOwnProperty("accessibilityLabel"))
                     object.accessibilityLabel = message.accessibilityLabel;
+                if (message.audio != null && message.hasOwnProperty("audio"))
+                    object.audio = $root.proto.Message.AudioMessage.toObject(message.audio, options);
                 return object;
             };
 

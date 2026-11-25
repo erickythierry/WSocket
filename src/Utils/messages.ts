@@ -601,6 +601,17 @@ export const generateWAMessageContent = async (
 		};
 	} else if ('requestPhoneNumber' in message) {
 		m.requestPhoneNumberMessage = {};
+	} else if ('sticker' in message && !!message.audio) {
+		const { audio, ...sticker } = message;
+		const { stickerMessage } = await prepareWAMessageMedia(sticker, options);
+		// ptt só para gerar o waveform; a figurinha original não marca ptt
+		const { audioMessage } = await prepareWAMessageMedia(
+			{ audio, ptt: true, mimetype: 'audio/ogg; codecs=opus' },
+			options
+		);
+		audioMessage!.ptt = undefined;
+		stickerMessage!.audio = audioMessage;
+		m = { stickerWithAudioMessage: { message: { stickerMessage } } };
 	} else {
 		m = await prepareWAMessageMedia(message, options);
 	}
@@ -897,7 +908,8 @@ export const normalizeMessageContent = (content: WAMessageContent | null | undef
 			message?.viewOnceMessageV2 ||
 			message?.viewOnceMessageV2Extension ||
 			message?.editedMessage ||
-			message?.spoilerMessage
+			message?.spoilerMessage ||
+			message?.stickerWithAudioMessage
 		);
 	}
 };

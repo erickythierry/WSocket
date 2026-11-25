@@ -166,6 +166,8 @@ export type AnyMediaMessageContent = (({
 } | ({
     sticker: WAMediaUpload;
     isAnimated?: boolean;
+    /** áudio que toca junto da figurinha (vai embrulhado em stickerWithAudioMessage) */
+    audio?: WAMediaUpload;
 } & WithDimensions) | ({
     document: WAMediaUpload;
     mimetype: string;

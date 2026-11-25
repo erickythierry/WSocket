@@ -1724,6 +1724,7 @@ message Message {
     optional ListResponseMessage listResponseMessage = 39;
     optional FutureProofMessage ephemeralMessage = 40;
     optional FutureProofMessage spoilerMessage = 118;
+    optional FutureProofMessage stickerWithAudioMessage = 134;
     optional InvoiceMessage invoiceMessage = 41;
     optional ButtonsMessage buttonsMessage = 42;
     optional ButtonsResponseMessage buttonsResponseMessage = 43;
@@ -3008,6 +3009,7 @@ message Message {
         optional bool isAiSticker = 20;
         optional bool isLottie = 21;
         optional string accessibilityLabel = 22;
+        optional AudioMessage audio = 26;
     }
     
     message StickerPackMessage {
